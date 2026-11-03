@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Viatrix</title>
+<meta name="description" content="I posti in cui sei stata, sulla mappa del mondo: paesi, città, viaggi e foto.">
+<meta name="theme-color" content="#F1F4F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0D1118" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Viatrix">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icona-180.png?v=1">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<script>
+  // tema scelto nell'app (prima di disegnare, così non lampeggia)
+  try { const t = localStorage.getItem("viatrix-tema"); if (t === "light" || t === "dark") { document.documentElement.dataset.theme = t;
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.removeAttribute("media"); m.content = t === "dark" ? "#0D1118" : "#F1F4F7"; }); } } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="stile.css?v=1">
+</head>
+<body>
+<div class="app" id="app">
+  <!-- Mappa -->
+  <section class="vista on" id="v-mappa" role="tabpanel" aria-label="Mappa">
+    <div class="mappa" id="mappa" aria-label="Mappa del mondo: tocca un paese"></div>
+    <header class="m-top">
+      <div class="m-card">
+        <div>
+          <div class="kicker">Il mio mondo</div>
+          <h1 class="m-title">Viatrix</h1>
+        </div>
+        <button class="m-pct" id="m-pct" aria-label="Percentuale del mondo visitato">
+          <svg viewBox="0 0 44 44" class="m-ring"><circle class="bg" cx="22" cy="22" r="18"/><circle class="fg" id="m-ring" cx="22" cy="22" r="18" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
+          <span><b id="m-num">0%</b><small id="m-sub">del mondo</small></span>
+        </button>
+      </div>
+      <div class="legenda" id="legenda"></div>
+    </header>
+    <div class="m-hint" id="m-hint"><span>👆</span> Tocca un paese per segnarlo</div>
+    <button class="m-btn" id="m-reset" aria-label="Vedi tutto il mondo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg>
+    </button>
+  </section>
+
+  <!-- Paesi -->
+  <section class="vista scorre" id="v-paesi" role="tabpanel" aria-label="Paesi"></section>
+
+  <!-- Numeri -->
+  <section class="vista scorre" id="v-numeri" role="tabpanel" aria-label="Numeri"></section>
+</div>
+
+<div class="navbar" id="navbar" aria-hidden="true"><span id="nav-t"></span></div>
+
+<nav class="tabbar" id="tabbar" role="tablist" style="--k:0">
+  <span class="tab-ind" aria-hidden="true"></span>
+  <button class="tab on" data-tab="mappa" role="tab" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z"/><path d="M9 4v14M15 6v14"/></svg><span>Mappa</span></button>
+  <button class="tab" data-tab="paesi" role="tab" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4.5c4-2 7 2 14 0v9c-7 2-10-2-14 0"/></svg><span>Paesi</span></button>
+  <button class="tab" data-tab="numeri" role="tab" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9h-9V3z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15V3.5z"/></svg><span>Numeri</span></button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+<div class="viewer" id="viewer"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="lib/d3.min.js"></script>
+<script src="lib/topojson-client.min.js"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>

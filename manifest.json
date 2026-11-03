@@ -1,0 +1,16 @@
+{
+  "name": "Viatrix",
+  "short_name": "Viatrix",
+  "description": "I posti in cui sei stata, sulla mappa del mondo: paesi, città, viaggi e foto.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F1F4F7",
+  "theme_color": "#F1F4F7",
+  "icons": [
+    { "src": "icona-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icona-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

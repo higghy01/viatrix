@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="cielo" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1F3A5F"/><stop offset="1" stop-color="#0E1B2E"/></linearGradient>
+    <linearGradient id="terra" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8A5B"/><stop offset="1" stop-color="#E4472B"/></linearGradient>
+    <clipPath id="globo"><circle cx="256" cy="272" r="150"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="0" fill="url(#cielo)"/>
+  <circle cx="256" cy="272" r="150" fill="#F5F1EA"/>
+  <g clip-path="url(#globo)" fill="none" stroke="#1F3A5F" stroke-opacity=".16" stroke-width="5">
+    <ellipse cx="256" cy="272" rx="70" ry="150"/><path d="M106 272h300M120 205h272M120 339h272"/>
+  </g>
+  <g clip-path="url(#globo)">
+    <path d="M150 190c30-28 70-20 92 2 18 18 8 42-12 50-22 9-24 30-10 46 14 17 4 44-22 46-30 3-52-24-58-56-5-30-12-66 10-88z" fill="#139C86"/>
+    <path d="M286 170c34-6 74 10 92 40 14 24 4 46-20 52-20 5-26 26-18 46 9 24-6 52-34 56-30 4-48-22-44-50 3-22-16-34-20-56-5-30 12-82 44-88z" fill="url(#terra)"/>
+  </g>
+  <path d="M256 92c-40 0-70 30-70 68 0 52 70 118 70 118s70-66 70-118c0-38-30-68-70-68z" fill="#F0AE2E" stroke="#0E1B2E" stroke-width="10"/>
+  <circle cx="256" cy="160" r="24" fill="#0E1B2E"/>
+</svg>
