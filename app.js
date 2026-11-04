@@ -1,4 +1,4 @@
-/* Viatrix — i posti in cui sei stata, sulla mappa.
+/* Viatrix — i posti in cui hai viaggiato, sulla mappa.
    Tutto resta sul telefono (IndexedDB): paesi, città, viaggi e foto. Niente account, niente server. */
 "use strict";
 const $ = s => document.querySelector(s);
@@ -12,9 +12,9 @@ const bandiera = c => /^[A-Z]{2}$/.test(c) ? String.fromCodePoint(...[...c].map(
 
 /* ---------- Cose fisse ---------- */
 const STATI = {
-  v: { t: "Visitato", e: "📍", cv: "--v" },
-  l: { t: "Ci vivo", e: "🏡", cv: "--l" },
-  w: { t: "Vorrei andarci", e: "✨", cv: "--w" }
+  v: { t: "Visitato", e: "📍", cv: "--v", cf: "--v-f" },
+  l: { t: "Ci vivo", e: "🏡", cv: "--l", cf: "--l-f" },
+  w: { t: "Vorrei andarci", e: "✨", cv: "--w", cf: "--w" }
 };
 const RANGO = { l: 3, v: 2, w: 1 };
 const MEZZI = [["aereo", "✈️", "Aereo"], ["treno", "🚆", "Treno"], ["auto", "🚗", "Auto"], ["nave", "⛴️", "Nave"], ["bus", "🚌", "Pullman"],
@@ -33,6 +33,7 @@ const ICO = {
   cerca: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`,
   foto: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   condividi: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2"/></svg>`,
+  salva: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/></svg>`,
   aggHome: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`,
   ingr: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>`
 };
@@ -52,9 +53,12 @@ const DB = {
       r.onerror = () => ko(r.error);
     });
   },
+  // true se all'avvio i dati salvati non si sono letti: allora non si scrive più niente (si cancellerebbero)
+  bloccato: false,
   tx(store, mode, fn) {
     return new Promise((ok, ko) => {
       if (!this.db) { ko(new Error("niente archivio")); return; }
+      if (mode === "readwrite" && this.bloccato) { ko(new Error("bloccato")); return; }
       const t = this.db.transaction(store, mode);
       const req = fn(t.objectStore(store));
       t.oncomplete = () => ok(req && req.result);
@@ -69,6 +73,7 @@ const DB = {
   // ripristino: tutto in un colpo, o non cambia niente
   sostituisci(dati, foto) {
     return new Promise((ok, ko) => {
+      if (!this.db || this.bloccato) { ko(new Error("bloccato")); return; }
       const t = this.db.transaction(["stato", "foto"], "readwrite");
       try { t.objectStore("stato").put(dati, "dati"); const sf = t.objectStore("foto"); sf.clear(); foto.forEach(f => sf.put(f)); }
       catch (e) { t.abort(); ko(e); return; }
@@ -85,11 +90,15 @@ let PAESI = [], P = {};            // dal file data/paesi.json
 const FOTO = new Map();            // chiave luogo → [{ id, t, mini, blob }]
 let tSalva = null;
 function salva(subito) {
-  clearTimeout(tSalva);
+  clearTimeout(tSalva); tSalva = null;
   if (!DB.db) return;   // finestra privata: l'avviso è già comparso all'avvio
-  const fai = () => DB.put("stato", dati, "dati").catch(() => toast("Non riesco a salvare: lo spazio del telefono è pieno?"));
+  if (DB.bloccato) { avvisoLettura(); return; }   // i dati veri non si sono letti: mai scriverci sopra
+  const fai = () => { tSalva = null; DB.put("stato", dati, "dati").catch(e => toast(e && e.name === "QuotaExceededError" ? "Non riesco a salvare: lo spazio del telefono è pieno" : "Non riesco a salvare: riprova tra poco")); };
   if (subito) fai(); else tSalva = setTimeout(fai, 250);
 }
+// Quando l'app va in secondo piano o si chiude: si salva subito quello che aspettava (anche la nota appena scritta)
+let notaInSospeso = null;
+function salvaSubito() { if (notaInSospeso) notaInSospeso(); if (tSalva) salva(true); }
 const cittaDi = c => Object.values(dati.citta).filter(x => x.c === c);
 function statoPaese(c) {
   let s = dati.paesi[c]?.s || null;
@@ -130,6 +139,9 @@ function fmtPeriodo(dal, al) {
 const giornoN = s => Math.round(Date.UTC(...(x => [x.y, x.m, x.d])(pd(s))) / 864e5);
 const giorni = (dal, al) => dal && al && al >= dal ? giornoN(al) - giornoN(dal) + 1 : dal ? 1 : 0;
 const nGiorni = n => n === 1 ? "1 giorno" : `${n} giorni`;
+// Un viaggio ha sempre il primo giorno: "al giorno" da solo diventa un viaggio di un giorno (chi ci vive può avere solo "fino al").
+function sistemaData(d) { if (d && d.s !== "l" && d.al && !d.dal) d.dal = d.al; }
+function sistemaDate(x) { Object.values(x.paesi || {}).forEach(sistemaData); Object.values(x.citta || {}).forEach(sistemaData); }
 
 /* ---------- Colori dal foglio di stile ---------- */
 let COL = {};
@@ -241,10 +253,8 @@ function disegna(now) {
   const cx = W / 2, cy = H / 2, dmax = Math.hypot(cx, cy);
   const ritardo = f => Math.hypot(f.cen[0] * t.k + t.x - cx, f.cen[1] * t.k + t.y - cy) / dmax;
   // piattaforma chiara intorno alle coste (come le carte nautiche)
-  ctx.lineJoin = "round"; ctx.lineWidth = 7 / t.k; ctx.strokeStyle = COL.shelf;
-  ctx.globalAlpha = chiaro(ip, .1, .5);
-  for (const f of vis) ctx.stroke(f.p);
-  ctx.globalAlpha = 1;
+  piattaforma(vis, chiaro(ip, .1, .5));
+  ctx.lineJoin = "round";
   ctx.lineWidth = .7 / t.k; ctx.strokeStyle = COL.line;
   for (const f of vis) {
     let col = colore(st[f.c]);
@@ -317,6 +327,30 @@ function disegna(now) {
     ctx.globalAlpha = 1;
   }
   if (vivo) richiedi();
+}
+/* La piattaforma delle coste è la parte più pesante del disegno (un contorno largo intorno a ogni paese).
+   Se la mappa è ferma (entrata, paesi che si colorano, onde) si disegna una volta in un'immagine a parte
+   e poi si copia: stesso aspetto, molto meno lavoro. Mentre si trascina o si ingrandisce si disegna come prima. */
+function piattaforma(vis, alfa) {
+  const { ctx, t, dpr, W, H } = M;
+  if (alfa <= 0) return;
+  const chiave = [t.k, t.x, t.y, W, H, dpr, COL.shelf].join("|");
+  if (M.pChiave !== chiave && M.pUltima === chiave) {
+    // ferma da due disegni: si prepara l'immagine
+    const c = M.pCv || (M.pCv = document.createElement("canvas"));
+    if (c.width !== M.cv.width || c.height !== M.cv.height) { c.width = M.cv.width; c.height = M.cv.height; }
+    const x = c.getContext("2d");
+    x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height);
+    x.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
+    x.lineJoin = "round"; x.lineWidth = 7 / t.k; x.strokeStyle = COL.shelf;
+    for (const f of vis) x.stroke(f.p);
+    M.pChiave = chiave;
+  }
+  M.pUltima = chiave;
+  ctx.globalAlpha = alfa;
+  if (M.pChiave === chiave) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(M.pCv, 0, 0); ctx.restore(); }
+  else { ctx.lineJoin = "round"; ctx.lineWidth = 7 / t.k; ctx.strokeStyle = COL.shelf; for (const f of vis) ctx.stroke(f.p); }
+  ctx.globalAlpha = 1;
 }
 function cambiaColore(c, primaS) {
   M.st = stati();
@@ -502,7 +536,7 @@ function rigaPaese(p, s, nc) {
   const d = dati.paesi[p.c] || {};
   const sub = [nc ? (nc === 1 ? "1 città" : `${nc} città`) : "", fmtPeriodo(d.dal, d.al)].filter(Boolean).join(" · ");
   return `<button class="riga" data-paese="${p.c}"><span class="flag">${bandiera(p.c)}</span><span class="nm"><b>${esc(p.n)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span>
-    ${s ? `<span class="pill ${s}" style="--c:var(${STATI[s].cv})">${STATI[s].t}</span>` : ICO.vai}</button>`;
+    ${s ? `<span class="pill ${s}" style="--c:var(${STATI[s].cf})">${STATI[s].t}</span>` : ICO.vai}</button>`;
 }
 
 /* ---------- Numeri ---------- */
@@ -612,7 +646,7 @@ function disegnaNumeri(entrata) {
     </div>
     ${timbri.length ? `<div class="sez-h">Il mio passaporto <small>${timbri.length === 1 ? "1 timbro" : timbri.length + " timbri"}</small></div>
     <div class="passaporto">${timbri.map((x, i) => { const h = seme(x.p.c);
-      return `<button class="timbro f${h % 3}${entrata ? " stampa" : ""}" data-paese="${x.p.c}" style="--r:${(h % 9) - 4}deg;--c:var(${STATI[x.s].cv});--i:${Math.min(i, 12)}">
+      return `<button class="timbro f${h % 3}${entrata ? " stampa" : ""}" data-paese="${x.p.c}" style="--r:${(h % 9) - 4}deg;--c:var(${STATI[x.s].cf});--i:${Math.min(i, 12)}">
         <span class="tf">${bandiera(x.p.c)}</span><b>${esc(nomeCorto(x.p.c))}</b><small>${x.s === "l" ? "casa" : x.a || "visitato"}</small></button>`; }).join("")}</div>` : ""}
     <div class="sez-h">Traguardi <small>${ok.size} di ${TROFEI.length}</small></div>
     <div class="trofei">${TROFEI.map((t, i) => `<div class="trofeo${ok.has(t[0]) ? " ok" : ""}${entrata ? " entra" : ""}" style="--i:${Math.min(i, 10)}"><span class="te">${ok.has(t[0]) ? t[1] : "🔒"}</span><b>${t[2]}</b><small>${t[3]}</small></div>`).join("")}</div>
@@ -782,7 +816,8 @@ window.addEventListener("popstate", () => {
   const l = st.l || 0;
   if (l < pila.length) { pila.length = l; if (l === 0) chiudiFoglio(); else mostra(false); }
 });
-const COLORI_BARRA = $$('meta[name="theme-color"]').map(m => [m, m.content]);
+// [meta, colore originale, "media" originale]: il tema scelto a mano in index.html li cambia, ma prima se li segna
+const COLORI_BARRA = $$('meta[name="theme-color"]').map(m => [m, m.dataset.orig || m.content, m.dataset.media ?? (m.getAttribute("media") || "")]);
 function sfondo(on) {
   if (document.documentElement.classList.contains("aperto") === on) return;
   document.documentElement.classList.toggle("aperto", on);
@@ -880,12 +915,15 @@ $("#sheet").addEventListener("scroll", () => { const top = pila[pila.length - 1]
       root.style.setProperty("--p", Math.max(0, 1 - dy / Math.max(300, sh.offsetHeight)).toFixed(3));
     } else if (sh.classList.contains("drag")) { sh.classList.remove("drag"); root.classList.remove("trascina"); sh.style.transform = ""; root.style.removeProperty("--p"); }
   }, { passive: true });
+  const rimetti = () => { sh.classList.remove("drag"); root.classList.remove("trascina"); sh.style.transform = ""; root.style.removeProperty("--p"); };
   sh.addEventListener("touchend", () => {
     if (y0 === null) return;
-    sh.classList.remove("drag"); root.classList.remove("trascina"); sh.style.transform = ""; root.style.removeProperty("--p");
+    rimetti();
     if (dy > 110 || (dy > 30 && vel > .6)) chiudiTutto();
     y0 = null;
   });
+  // tocco interrotto dal sistema (una chiamata, il Centro di Controllo): il foglio torna al suo posto, senza chiudersi
+  sh.addEventListener("touchcancel", () => { if (y0 === null) return; rimetti(); y0 = null; });
 })();
 
 const barraFoglio = () => {
@@ -898,7 +936,7 @@ const barraFoglio = () => {
 const suggerimento = (s, eff) => s ? "Tocca di nuovo per togliere." : eff ? "Sulla mappa è già colorato per le città che hai segnato." : "Scegli una delle tre: il posto si colora sulla mappa.";
 function htmlStato(s, eff) {
   return `<div class="seg" role="group" aria-label="Stato">${Object.entries(STATI).map(([k, x]) =>
-    `<button data-stato="${k}" aria-pressed="${s === k}" style="--c:var(${x.cv})"><span class="e">${x.e}</span>${x.t}</button>`).join("")}</div>
+    `<button data-stato="${k}" aria-pressed="${s === k}" style="--c:var(${x.cf})"><span class="e">${x.e}</span>${x.t}</button>`).join("")}</div>
     <p class="piccolo" id="st-hint">${suggerimento(s, eff)}</p>`;
 }
 function htmlViaggio(d) {
@@ -1128,7 +1166,9 @@ function collegaLuogo(top) {
   $("#f-foto").addEventListener("change", e => { const files = [...e.target.files]; e.target.value = ""; if (files.length) aggiungiFoto(kFoto, files, top); });
   $("#album").addEventListener("click", e => { const b = e.target.closest("[data-foto]"); if (b) apriFoto(kFoto, b.dataset.foto, top); });
   // note
-  let tn; $("#f-nota").addEventListener("input", e => { clearTimeout(tn); tn = setTimeout(() => { rec().nota = e.target.value.slice(0, 2000); if (paese) pulisciVuoto(c); salva(); }, 300); });
+  const ta = $("#f-nota");
+  let tn; const applicaNota = () => { clearTimeout(tn); notaInSospeso = null; rec().nota = ta.value.slice(0, 2000); if (paese) pulisciVuoto(c); salva(); };
+  ta.addEventListener("input", () => { clearTimeout(tn); notaInSospeso = applicaNota; tn = setTimeout(applicaNota, 300); });
   if (paese) {
     sh.querySelector("[data-aggiungi]").addEventListener("click", () => { tocco(); apriLivello({ tipo: "scegli", c }); });
     sh.querySelectorAll(".citta [data-citta]").forEach(b => b.addEventListener("click", () => { tocco(); apriLivello({ tipo: "citta", id: b.dataset.citta, meta: top.meta }); }));
@@ -1137,7 +1177,9 @@ function collegaLuogo(top) {
       const b = e.currentTarget;
       if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora per togliere"; tocco(); return; }
       const prima = statoPaese(c);
-      for (const f of FOTO.get(kFoto) || []) await DB.del("foto", f.id).catch(() => {});
+      if (DB.bloccato) { avvisoLettura(); return; }
+      try { for (const f of [...(FOTO.get(kFoto) || [])]) { await DB.del("foto", f.id); FOTO.set(kFoto, FOTO.get(kFoto).filter(x => x !== f)); } }
+      catch (er) { toast("Non riesco a togliere le foto della città: riprova"); b.classList.remove("sicuro"); b.textContent = "Togli questa città"; return; }
       FOTO.delete(kFoto);
       delete dati.citta[top.id]; salva(true);
       dopoCambio(c, prima);
@@ -1166,8 +1208,9 @@ function collegaViaggio(rec) {
     } else if (du) du.remove();
   };
   const togliDate = () => { tocco(); const d = rec(); d.dal = d.al = null; salva(); aggiornaDurata(); dopoCambio(null); };
-  dal.addEventListener("change", () => { const d = rec(); d.dal = dal.value || null; if (d.al && d.dal && d.al < d.dal) d.al = d.dal; salva(); aggiornaDurata(); dopoCambio(null); });
-  al.addEventListener("change", () => { const d = rec(); d.al = al.value || null; if (d.al && d.dal && d.al < d.dal) d.dal = d.al; salva(); aggiornaDurata(); dopoCambio(null); });
+  // senza il primo giorno non resta un "al giorno" da solo (tranne per chi ci vive: "fino al" ha senso anche da solo)
+  dal.addEventListener("change", () => { const d = rec(); d.dal = dal.value || null; if (!d.dal && d.s !== "l") d.al = null; if (d.al && d.dal && d.al < d.dal) d.al = d.dal; salva(); aggiornaDurata(); dopoCambio(null); });
+  al.addEventListener("change", () => { const d = rec(); d.al = al.value || null; sistemaData(d); if (d.al && d.dal && d.al < d.dal) d.dal = d.al; salva(); aggiornaDurata(); dopoCambio(null); });
   $("#viaggio [data-nodate]")?.addEventListener("click", togliDate);
   $$("#viaggio [data-mezzo]").forEach(b => b.addEventListener("click", () => {
     tocco();
@@ -1222,8 +1265,8 @@ function applicaTema(t) {
   if (t === "light" || t === "dark") root.dataset.theme = t; else delete root.dataset.theme;
   scriviLS("viatrix-tema", t === "auto" ? null : t);
   const scuro = t === "dark" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
-  COLORI_BARRA.forEach(([m, orig]) => {
-    if (t === "auto") { const md = orig === "#0D1118" ? "(prefers-color-scheme: dark)" : "(prefers-color-scheme: light)"; m.setAttribute("media", md); m.dataset.c = orig; }
+  COLORI_BARRA.forEach(([m, orig, media]) => {
+    if (t === "auto") { if (media) m.setAttribute("media", media); else m.removeAttribute("media"); m.dataset.c = orig; }
     else { m.removeAttribute("media"); m.dataset.c = scuro ? "#0D1118" : "#F1F4F7"; }
     m.content = document.documentElement.classList.contains("aperto") ? "#000000" : m.dataset.c;
   });
@@ -1244,6 +1287,7 @@ function collegaImp() {
   $("#b-canc").addEventListener("click", async e => {
     const b = e.currentTarget;
     if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora: cancella paesi, città e foto"; tocco(); return; }
+    if (DB.bloccato) { avvisoLettura(); return; }
     try {
       await DB.sostituisci({ paesi: {}, citta: {} }, []);
       programmaStat(1000);
@@ -1252,31 +1296,55 @@ function collegaImp() {
     } catch (er) { toast("Non riesco a cancellare"); }
   });
 }
-const blobInData = b => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); });
-async function esportaCopia() {
-  const b = $("#b-salva"); b.textContent = "Preparo la copia…"; b.disabled = true;
+const blobInData = b => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(r.error); r.readAsDataURL(b); });
+// Il file della copia: ogni foto diventa subito un pezzo di file (Blob), così il testo lungo delle foto non resta tutto in memoria.
+async function preparaCopia() {
+  const testa = JSON.stringify({ app: "viatrix", versione: 1, creata: new Date().toISOString(), dati });
+  const pezzi = [testa.slice(0, -1) + ',"foto":['];
+  const foto = await DB.all("foto");
+  for (let k = 0; k < foto.length; k++) {
+    const f = foto[k];
+    pezzi.push(new Blob([(k ? "," : "") + JSON.stringify({ id: f.id, k: f.k, t: f.t, mini: f.mini, data: await blobInData(f.blob) })]));
+  }
+  pezzi.push("]}");
+  return new File(pezzi, `viatrix-copia-${new Date().toISOString().slice(0, 10)}.json`, { type: "application/json" });
+}
+function scaricaFile(file) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+// Condivide la copia (iPhone: "Salva su File", AirDrop…). Dice se è andata; "tardi" se serve un tocco nuovo.
+async function condividiCopia(file) {
+  if (!(navigator.canShare && navigator.canShare({ files: [file] }))) { scaricaFile(file); return "ok"; }
+  try { await navigator.share({ files: [file], title: "Copia di Viatrix" }); return "ok"; }
+  catch (e) {
+    if (e.name === "AbortError") return "annullata";
+    // Safari lascia condividere solo subito dopo un tocco: con tante foto la preparazione dura di più
+    if (e.name === "NotAllowedError") return "tardi";
+    scaricaFile(file); return "ok";
+  }
+}
+async function esportaCopia(ev) {
+  const b = ev?.currentTarget || $("#b-salva"), testo = "Salva una copia";
+  if (b._copia) {   // copia già pronta: questo è il tocco nuovo
+    const file = b._copia; b._copia = null; b.classList.remove("pronta"); b.textContent = testo;
+    const r = await condividiCopia(file);
+    if (r === "ok") toast("Copia pronta");
+    else if (r === "tardi") { b._copia = file; b.classList.add("pronta"); b.textContent = "La copia è pronta: tocca per salvarla"; }
+    return;
+  }
+  if (b.disabled) return;
+  b.textContent = "Preparo la copia…"; b.disabled = true;
+  const t0 = Date.now();
   try {
-    const testa = JSON.stringify({ app: "viatrix", versione: 1, creata: new Date().toISOString(), dati });
-    const pezzi = [testa.slice(0, -1) + ',"foto":['];
-    const foto = await DB.all("foto");
-    for (let k = 0; k < foto.length; k++) {
-      const f = foto[k];
-      pezzi.push((k ? "," : "") + JSON.stringify({ id: f.id, k: f.k, t: f.t, mini: f.mini, data: await blobInData(f.blob) }));
-    }
-    pezzi.push("]}");
-    const nome = `viatrix-copia-${new Date().toISOString().slice(0, 10)}.json`;
-    const file = new File(pezzi, nome, { type: "application/json" });
-    let fatta = true;
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: "Copia di Viatrix" }); }
-      catch (e) { if (e.name === "AbortError") fatta = false; else throw e; }
-    } else {
-      const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = nome;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    }
-    if (fatta) toast("Copia pronta");
-  } catch (e) { toast("Non riesco a fare la copia"); }
-  b.textContent = "Salva una copia"; b.disabled = false;
+    const file = await preparaCopia();
+    // se ci ha messo tanto, il tocco di prima non vale più: si chiede un tocco nuovo
+    const r = Date.now() - t0 > 3000 && navigator.canShare && navigator.canShare({ files: [file] }) ? "tardi" : await condividiCopia(file);
+    b.disabled = false;
+    if (r === "tardi") { b._copia = file; b.classList.add("pronta"); b.textContent = "La copia è pronta: tocca per salvarla"; tocco(); return; }
+    if (r === "ok") toast("Copia pronta");
+  } catch (e) { toast("Non riesco a fare la copia: riprova"); }
+  b.textContent = testo; b.disabled = false;
 }
 const CODICE = /^[A-Z]{2}$/;
 // un'immagine vera in formato testo (niente virgolette o altro che possa uscire dall'attributo src)
@@ -1313,9 +1381,12 @@ function chiediRipristino(file) {
         const foto = [];
         for (const f of d.foto || []) {
           if (!f || !IMG_OK.test(f.data) || !chiavi.has(f.k)) continue;
-          const mini = IMG_OK.test(f.mini) ? f.mini : await miniDa(await (await fetch(f.data)).blob());
-          foto.push({ id: String(f.id), k: f.k, t: +f.t || Date.now(), mini, blob: await (await fetch(f.data)).blob() });
+          const blob = await (await fetch(f.data)).blob();
+          f.data = null;   // il testo lungo della foto non serve più: si libera la memoria
+          const mini = IMG_OK.test(f.mini) ? f.mini : await miniDa(blob);
+          foto.push({ id: String(f.id), k: f.k, t: +f.t || Date.now(), mini, blob });
         }
+        sistemaDate(nd);
         await DB.sostituisci(nd, foto);
         programmaStat(1000);
         dati = nd; FOTO.clear(); foto.forEach(indicizzaFoto); pctPrima = -1;
@@ -1329,34 +1400,44 @@ function chiediRipristino(file) {
 /* ---------- Foto ---------- */
 function indicizzaFoto(f) { const l = FOTO.get(f.k) || []; l.push(f); l.sort((a, b) => b.t - a.t); FOTO.set(f.k, l); }
 function caricaImg(blob) { return new Promise((ok, ko) => { const u = URL.createObjectURL(blob), im = new Image(); im.onload = () => ok({ im, u }); im.onerror = () => { URL.revokeObjectURL(u); ko(); }; im.src = u; }); }
-function suCanvas(im, lato) {
+// Le tele usate per rimpicciolire si svuotano subito (width = height = 0): Safari ne tiene poche in memoria.
+const libera = c => { c.width = c.height = 0; };
+async function rimpicciolita(im, lato) {
   const k = Math.min(1, lato / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
   c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
-  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); return c;
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+  const blob = await new Promise(ok => c.toBlob(ok, "image/jpeg", .82));
+  libera(c);
+  if (!blob) throw new Error("foto");
+  return blob;
 }
 function quadrata(im, lato) {
   const s = Math.min(im.naturalWidth, im.naturalHeight), c = document.createElement("canvas");
   c.width = c.height = lato;
   c.getContext("2d").drawImage(im, (im.naturalWidth - s) / 2, (im.naturalHeight - s) / 2, s, s, 0, 0, lato, lato);
-  return c.toDataURL("image/jpeg", .78);
+  const u = c.toDataURL("image/jpeg", .78); libera(c); return u;
 }
 async function miniDa(blob) { const { im, u } = await caricaImg(blob); const m = quadrata(im, 300); URL.revokeObjectURL(u); return m; }
 async function aggiungiFoto(k, files, top) {
   if (!DB.db) { toast("In una finestra privata le foto non si possono salvare"); return; }
+  if (DB.bloccato) { avvisoLettura(); return; }
   toast(files.length === 1 ? "Aggiungo la foto…" : `Aggiungo ${files.length} foto…`);
-  let n = 0;
+  let n = 0, illeggibili = 0, errSalva = null;
   for (const file of files.slice(0, 30)) {
+    let f;
     try {
       const { im, u } = await caricaImg(file);
-      const blob = await new Promise(ok => suCanvas(im, 1600).toBlob(ok, "image/jpeg", .82));
-      const f = { id: nuovoId(), k, t: Date.now() + n, mini: quadrata(im, 300), blob };
-      URL.revokeObjectURL(u);
-      await DB.put("foto", f);
-      indicizzaFoto(f); n++;
-    } catch (e) {}
+      try { f = { id: nuovoId(), k, t: Date.now() + n, mini: quadrata(im, 300), blob: await rimpicciolita(im, 1600) }; }
+      finally { URL.revokeObjectURL(u); }
+    } catch (e) { illeggibili++; continue; }
+    // se il salvataggio non riesce (di solito lo spazio è pieno) è inutile provare con le altre
+    try { await DB.put("foto", f); } catch (e) { errSalva = e; break; }
+    indicizzaFoto(f); n++;
   }
-  if (!n) { toast("Non riesco a leggere questa foto"); return; }
-  toast(n === 1 ? "Foto aggiunta" : `${n} foto aggiunte`);
+  if (errSalva) toast(errSalva.name === "QuotaExceededError" ? (n ? `${n} foto aggiunte, poi lo spazio del telefono è finito` : "Lo spazio del telefono è pieno: la foto non si salva")
+    : (n ? `${n} foto aggiunte, le altre non si sono salvate: riprova` : "Non riesco a salvare la foto: riprova"));
+  if (!n) { if (!errSalva) toast(illeggibili > 1 ? "Non riesco a leggere queste foto" : "Non riesco a leggere questa foto"); return; }
+  if (!errSalva) toast(n === 1 ? "Foto aggiunta" : `${n} foto aggiunte${illeggibili ? `, ${illeggibili} non si leggono` : ""}`);
   clearTimeout(tPremi); tPremi = setTimeout(controllaPremi, 600);
   programmaStat();
   if (pila[pila.length - 1] === top) {
@@ -1385,7 +1466,8 @@ function apriFoto(k, id, top) {
   v.querySelector("[data-del]").onclick = async e => {
     const b = e.currentTarget;
     if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora per eliminare"; tocco(); return; }
-    await DB.del("foto", id).catch(() => {});
+    // se non si cancella davvero, resta anche qui (prima spariva e poi tornava alla riapertura)
+    try { await DB.del("foto", id); } catch (er) { toast(DB.bloccato ? "Non salvo niente: prima riapri l'app" : "Non riesco a eliminare la foto: riprova"); return; }
     FOTO.set(k, (FOTO.get(k) || []).filter(x => x.id !== id));
     if (!FOTO.get(k).length) FOTO.delete(k);
     if (k.startsWith("p:")) pulisciVuoto(k.slice(2));
@@ -1399,7 +1481,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.6";
+const VERSIONE_APP = "2.7";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
@@ -1424,7 +1506,7 @@ const fsV = v => typeof v === "boolean" ? { booleanValue: v } : Number.isInteger
 const daFS = v => !v ? null : "stringValue" in v ? v.stringValue : "integerValue" in v ? +v.integerValue : "booleanValue" in v ? v.booleanValue
   : "arrayValue" in v ? (v.arrayValue.values || []).map(daFS) : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, daFS(x)])) : null;
 let tStat = null;
-function programmaStat(ms) { if (!FB.progetto) return; clearTimeout(tStat); tStat = setTimeout(inviaStat, ms ?? 8000); }
+function programmaStat(ms) { if (!FB.progetto || DB.bloccato) return; clearTimeout(tStat); tStat = setTimeout(inviaStat, ms ?? 8000); }
 async function inviaStat() {
   if (!FB.progetto || !navigator.onLine || !PAESI.length) return;
   const id = idDispositivo(); if (!id) return;
@@ -1603,10 +1685,13 @@ function disegnaMappaStat(conti) {
 const installata = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const suIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const suTelefono = () => suIOS() || /Android/.test(navigator.userAgent);
+const ciSonoDati = () => Object.keys(dati.paesi).length > 0 || Object.keys(dati.citta).length > 0 || FOTO.size > 0;
 function avvisoHome(forza) {
-  if (installata() || (!forza && !suTelefono())) return;
-  if (!forza && Date.now() < (+leggiLS("viatrix-home-dopo") || 0)) return;
+  if (installata() || (!forza && !suTelefono())) return false;
+  if (!forza && Date.now() < (+leggiLS("viatrix-home-dopo") || 0)) return false;
   const el = $("#home-av");
+  // Su iPhone l'app sulla Home ha un archivio suo, separato da Safari: quello che è segnato qui non passa da solo.
+  const daPortare = suIOS() && ciSonoDati();
   const passi = suIOS()
     ? [[ICO.condividi, "Tocca <b>Condividi</b>", "il quadrato con la freccia nella barra di Safari (se non lo vedi, prima i tre puntini «…»)"],
        [ICO.aggHome, "Scegli <b>Aggiungi alla schermata Home</b>", "se non c'è, scorri un po' l'elenco"],
@@ -1614,9 +1699,16 @@ function avvisoHome(forza) {
     : [["⋮", "Apri il <b>menu</b> del browser", "i tre puntini in alto"],
        [ICO.aggHome, "Scegli <b>Installa app</b> o <b>Aggiungi a schermata Home</b>", ""],
        [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]];
+  if (daPortare) {
+    passi.unshift([ICO.salva, "Prima tocca <b>Salva una copia</b>", "qui sotto, e tienila per esempio su iCloud Drive"]);
+    passi.push(["↺", "Nell'app scegli <b>Ripristina da una copia</b>", "Impostazioni, la rotellina in Numeri"]);
+  }
   el.innerHTML = `<button class="x" data-x aria-label="Chiudi">${ICO.x}</button>
-    <div class="ha-t"><b>Mettila sulla schermata Home</b><span>Così si apre come un'app e i tuoi viaggi restano al sicuro: aperta solo da ${suIOS() ? "Safari" : "browser"}, il telefono potrebbe cancellarli dopo qualche settimana.</span></div>
+    <div class="ha-t"><b>Mettila sulla schermata Home</b><span>${daPortare
+      ? "Così si apre come un'app vera, anche senza internet. Attenzione: l'app sulla Home parte vuota, i viaggi segnati qui non passano da soli. Per portarli, una copia:"
+      : `Così si apre come un'app vera, anche senza internet. Aperta solo da ${suIOS() ? "Safari" : "browser"}, il telefono potrebbe cancellare i dati dopo qualche settimana.`}</span></div>
     <ol class="ha-passi">${passi.map((p, i) => `<li style="--i:${i}"><span class="ha-ic">${p[0]}</span><div>${p[1]}${p[2] ? `<small>${p[2]}</small>` : ""}</div></li>`).join("")}</ol>
+    ${daPortare ? `<button class="btn pieno ha-btn" data-copia>Salva una copia</button>` : ""}
     <button class="ha-dopo" data-dopo>Più tardi</button>`;
   const chiudi = () => {
     tocco();
@@ -1625,8 +1717,44 @@ function avvisoHome(forza) {
   };
   el.querySelector("[data-x]").onclick = chiudi;
   el.querySelector("[data-dopo]").onclick = chiudi;
+  el.querySelector("[data-copia]")?.addEventListener("click", esportaCopia);
+  apriCartoncino(el);
+  return true;
+}
+function apriCartoncino(el) {
   document.documentElement.classList.add("avviso-home");
   requestAnimationFrame(() => el.classList.add("on"));
+}
+function chiudiCartoncino() { $("#home-av").classList.remove("on"); document.documentElement.classList.remove("avviso-home"); }
+/* Nell'app sulla Home, con la mappa ancora vuota: se i viaggi sono stati segnati prima in Safari, si riportano con una copia.
+   Compare solo su iPhone, solo con la mappa vuota, e con "No, grazie" non torna più. */
+function avvisoCopia() {
+  if (!installata() || !suIOS() || ciSonoDati() || leggiLS("viatrix-copia-no") || !DB.db) return false;
+  const el = $("#home-av");
+  el.innerHTML = `<button class="x" data-x aria-label="Chiudi">${ICO.x}</button>
+    <div class="ha-t"><b>Hai già segnato dei viaggi in Safari?</b><span>L'app sulla Home ha un archivio suo: se in Safari hai salvato una copia, riportala qui e ritrovi tutto.</span></div>
+    <label class="btn pieno ha-btn">Ripristina una copia<input type="file" accept="application/json,.json" data-file hidden></label>
+    <button class="ha-dopo" data-dopo>No, grazie: comincio da zero</button>`;
+  const via = () => { tocco(); scriviLS("viatrix-copia-no", "1"); chiudiCartoncino(); };
+  el.querySelector("[data-x]").onclick = via;
+  el.querySelector("[data-dopo]").onclick = via;
+  el.querySelector("[data-file]").addEventListener("change", e => {
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    chiudiCartoncino(); apriLivello({ tipo: "imp" }); chiediRipristino(f);
+  });
+  apriCartoncino(el);
+  return true;
+}
+/* I dati salvati non si sono letti (succede di rado, se l'archivio del telefono non risponde):
+   l'app non scrive niente per non cancellarli, e chiede di riaprirla. */
+let tLettura = 0;
+function avvisoLettura(subito) {
+  if (!subito) { if (Date.now() - tLettura > 4000) { tLettura = Date.now(); toast("Non salvo niente: prima riapri l'app, così ritrovi i tuoi viaggi"); } return; }
+  const el = $("#home-av");
+  el.innerHTML = `<div class="ha-t" style="padding-right:0"><b>Non riesco a leggere i tuoi viaggi</b><span>Sono ancora sul telefono, ma l'archivio non ha risposto. Per non cancellarli non salvo niente finché non riapri l'app.</span></div>
+    <button class="btn pieno ha-btn" data-riprova>Riapri l'app</button>`;
+  el.querySelector("[data-riprova]").onclick = () => { tocco(); location.reload(); };
+  apriCartoncino(el);
 }
 
 /* ---------- Tocco e avvisi ---------- */
@@ -1654,19 +1782,29 @@ document.addEventListener("focusin", e => {
   setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), 320);
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { leggiColori(); richiedi(); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); else if (tStat) { clearTimeout(tStat); tStat = null; inviaStat(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); else { salvaSubito(); if (tStat) { clearTimeout(tStat); tStat = null; inviaStat(); } } });
+addEventListener("pagehide", salvaSubito);
 
 (async () => {
   leggiColori();
   $("#mappa").innerHTML = `<div class="caric">Preparo la mappa…</div>`;
-  try {
-    await DB.open();
-    const d = await DB.get("stato", "dati");
-    if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0 };
-    (await DB.all("foto")).forEach(indicizzaFoto);
-    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  } catch (e) {
-    toast("Il telefono non lascia salvare i dati: forse è una finestra privata");
+  try { await DB.open(); } catch (e) { toast("Il telefono non lascia salvare i dati: forse è una finestra privata"); }
+  if (DB.db) {
+    // Lettura dei dati salvati, con due tentativi in più (su iPhone a volte l'archivio risponde in ritardo).
+    // Se non si leggono, l'app parte ma NON salva niente: altrimenti la mappa vuota cancellerebbe quella vera.
+    for (let i = 0; ; i++) {
+      try {
+        const d = await DB.get("stato", "dati"), foto = await DB.all("foto");
+        if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0 };
+        sistemaDate(dati);
+        FOTO.clear(); foto.forEach(indicizzaFoto);
+        break;
+      } catch (e) {
+        if (i < 2) { await new Promise(r => setTimeout(r, 400 * (i + 1))); continue; }
+        DB.bloccato = true; break;
+      }
+    }
+    if (!DB.bloccato && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   }
   try {
     const [pa, mo] = await Promise.all([fetch("data/paesi.json").then(r => r.json()), fetch("data/mondo.json").then(r => r.json())]);
@@ -1683,8 +1821,9 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) glob
   if (!pocoMoto()) { M.intro = performance.now() + 120; document.documentElement.classList.add("avvio"); setTimeout(() => document.documentElement.classList.remove("avvio"), 2600); }
   vistaIniziale();
   aggiornaTesta();
+  if (DB.bloccato) { avvisoLettura(true); return; }   // niente premi, statistiche o altri avvisi finché non si riapre
   if (!Array.isArray(dati.visti)) controllaPremi();
-  setTimeout(() => { if (!pila.length) avvisoHome(); }, 2400);
+  setTimeout(() => { if (!pila.length) avvisoHome() || avvisoCopia(); }, 2400);
   scriviLS("viatrix-aperture", String((+leggiLS("viatrix-aperture") || 0) + 1));
   programmaStat(3000);
 })();

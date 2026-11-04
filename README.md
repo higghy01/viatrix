@@ -14,9 +14,10 @@ Funziona sull'iPhone come un'app vera: Safari → Condividi → **Aggiungi alla 
 
 ## I dati
 Paesi, città e foto restano **solo sul telefono** (niente account, niente server). Nelle Impostazioni (rotellina in Numeri) c'è **Salva una copia**, da tenere per esempio su iCloud Drive.
+Su iPhone l'app sulla schermata Home ha un archivio suo, separato da Safari: chi ha già segnato dei viaggi in Safari salva una copia e la ripristina nell'app (il cartoncino "Mettila sulla schermata Home" lo spiega).
 
 ## Statistiche anonime
-Se in `config.js` c'è il progetto Firebase, ogni telefono manda un riepilogo **anonimo** (nome casuale, nessun nome di persona): codici dei paesi segnati, quante città e foto, livello, mezzi usati, se l'app è sulla Home, primo e ultimo giorno d'uso. Mai città, date dei viaggi, foto o note. Lo legge solo il proprietario, nella sezione Statistiche (Impostazioni). Regole del database in `firestore.rules`: accettano solo codici di paesi veri, mezzi conosciuti e numeri interi; la sezione ripulisce comunque ogni riepilogo prima di mostrarlo.
+Se in `config.js` c'è il progetto Firebase, ogni telefono manda un riepilogo **anonimo** (nome casuale, nessun nome di persona): codici dei paesi segnati, quante città e foto, livello, mezzi usati, se l'app è sulla Home, primo e ultimo giorno d'uso. Mai città, date dei viaggi, foto o note. Lo legge solo il proprietario, nella sezione Statistiche (Impostazioni). Regole del database in `firestore.rules`: accettano solo codici di due lettere maiuscole (al massimo 260), mezzi conosciuti e numeri interi; la sezione ripulisce comunque ogni riepilogo prima di mostrarlo (tiene solo i codici dei paesi veri).
 
 ## Come è fatta
 - `index.html`, `stile.css`, `app.js`: l'app. `config.js`: impostazioni pubbliche di Firebase per le statistiche. `sw.js`: la copia per usarla senza rete (a ogni modifica alzare `VERSIONE` e il `?v=`).

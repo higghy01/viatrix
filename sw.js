@@ -1,8 +1,11 @@
 /* Copia dell'app sul telefono: si apre anche senza rete.
    A ogni modifica dei file alzare VERSIONE, altrimenti il telefono resta sulla vecchia. */
-const VERSIONE = "viatrix-v9";
-const FILE = ["./", "index.html", "stile.css?v=9", "app.js?v=9", "config.js?v=9", "lib/d3.min.js", "lib/topojson-client.min.js",
+const VERSIONE = "viatrix-v10";
+const FILE = ["./", "index.html", "stile.css?v=10", "app.js?v=10", "config.js?v=10", "lib/d3.min.js", "lib/topojson-client.min.js",
   "data/paesi.json", "data/mondo.json", "data/globo.json", "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
+// Con la rete lenta (aeroporto, roaming) si aspetta al massimo 3 secondi, poi si apre la copia
+const ATTESA = 3000;
+let lentaFino = 0;
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSIONE).then(c => c.addAll(FILE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {
   // solo le copie di Viatrix: sullo stesso indirizzo (higghy01.github.io) ci sono anche altre app
@@ -18,9 +21,21 @@ self.addEventListener("fetch", e => {
       // mappa, città e librerie cambiano solo con una versione nuova: prima la copia
       e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(n => { if (n.ok) { const c = n.clone(); caches.open(VERSIONE).then(x => x.put(e.request, c)); } return n; })));
     } else {
-      // pagina, stile e codice: prima la rete (così le novità arrivano subito), senza rete la copia
-      e.respondWith(fetch(e.request).then(r => { if (r.ok) { const c = r.clone(); caches.open(VERSIONE).then(x => x.put(e.request, c)); } return r; })
-        .catch(() => caches.match(e.request).then(r => r || caches.match("index.html"))));
+      // pagina, stile e codice: prima la rete (così le novità arrivano subito), ma se tarda più di 3 secondi
+      // o non c'è, la copia; la risposta della rete, se arriva dopo, aggiorna comunque la copia per la prossima volta.
+      const rete = fetch(e.request);
+      // (la copia della risposta si fa prima di darla alla pagina: questo "then" è registrato per primo)
+      e.waitUntil(rete.then(r => { if (r.ok) { const c = r.clone(); return caches.open(VERSIONE).then(x => x.put(e.request, c)); } }).catch(() => {}));
+      const copia = () => caches.match(e.request).then(r => r || caches.match("index.html"));
+      e.respondWith(new Promise(ok => {
+        let fatto = false;
+        const dai = r => { if (!fatto && r) { fatto = true; ok(r); } };
+        // appena la rete si è dimostrata lenta, per mezzo minuto gli altri file vengono subito dalla copia (la rete li aggiorna dopo)
+        const giaLenta = Date.now() < lentaFino;
+        const t = setTimeout(() => { if (!giaLenta) lentaFino = Date.now() + 30000; caches.match(e.request).then(dai); }, giaLenta ? 0 : ATTESA);
+        rete.then(r => { clearTimeout(t); dai(r); }, () => { clearTimeout(t); copia().then(r => dai(r || Response.error())); });
+        // se dopo i 3 secondi non c'è nessuna copia, si aspetta comunque la rete (o il suo errore)
+      }));
     }
   } else if (u.host.endsWith("fonts.googleapis.com") || u.host.endsWith("fonts.gstatic.com")) {
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(n => { const c = n.clone(); caches.open(VERSIONE).then(x => x.put(e.request, c)); return n; })));
