@@ -850,7 +850,17 @@ function chiudiFoglio() {
   liberaGrandi();
   aggiornaTutto();
 }
-$("#scrim").onclick = () => chiudiTutto();
+/* Tocco sulla mappa dietro la scheda: chiude, ma non se si sta scrivendo o si è appena scelta una data
+   (su iPhone il tocco che chiude il calendario o la tastiera può arrivare fin qui) */
+let ultimoCampo = 0;
+document.addEventListener("change", e => { if (e.target.matches?.("input,textarea,select")) ultimoCampo = Date.now(); }, true);
+document.addEventListener("focusout", e => { if (e.target.matches?.("input,textarea,select")) ultimoCampo = Date.now(); }, true);
+$("#scrim").onclick = () => {
+  const a = document.activeElement;
+  if (a && a.matches("input,textarea,select")) { a.blur(); return; }
+  if (Date.now() - ultimoCampo < 700) return;
+  chiudiTutto();
+};
 document.addEventListener("keydown", e => { if (e.key === "Escape" && (pila.length || viewerAperto)) history.back(); });
 // si ricorda dove eri nel foglio, per tornarci con "indietro"
 $("#sheet").addEventListener("scroll", () => { const top = pila[pila.length - 1]; if (top) top.scroll = $("#sheet").scrollTop; }, { passive: true });
@@ -1139,13 +1149,26 @@ function collegaLuogo(top) {
 function collegaViaggio(rec) {
   const dal = $("#f-dal"), al = $("#f-al");
   if (!dal) return;
+  /* Le caselle delle date NON si ridisegnano mai: su iPhone il calendario resta aperto mentre si sceglie,
+     e togliere la casella sotto il dito lo chiude di colpo (il tocco poi finiva sulla mappa e chiudeva la scheda).
+     Si aggiornano solo i valori diversi, il minimo della seconda data e la riga "N giorni". */
   const aggiornaDurata = () => {
-    const d = rec(); const vb = $("#viaggio"); const y = $("#sheet").scrollTop;
-    vb.innerHTML = htmlViaggio(d); collegaViaggio(rec); $("#sheet").scrollTop = y;
+    const d = rec(), vivo = d.s === "l", n = giorni(d.dal, d.al);
+    if (dal.value !== (d.dal || "")) dal.value = d.dal || "";
+    if (al.value !== (d.al || "")) al.value = d.al || "";
+    if (d.dal) al.min = d.dal; else al.removeAttribute("min");
+    const card = dal.closest(".card");
+    let du = card.querySelector(".durata");
+    if (n && !vivo) {
+      if (!du) { du = document.createElement("div"); du.className = "durata"; card.appendChild(du); }
+      du.innerHTML = `<span>${nGiorni(n)}</span><button data-nodate>Togli le date</button>`;
+      du.querySelector("[data-nodate]").addEventListener("click", togliDate);
+    } else if (du) du.remove();
   };
+  const togliDate = () => { tocco(); const d = rec(); d.dal = d.al = null; salva(); aggiornaDurata(); dopoCambio(null); };
   dal.addEventListener("change", () => { const d = rec(); d.dal = dal.value || null; if (d.al && d.dal && d.al < d.dal) d.al = d.dal; salva(); aggiornaDurata(); dopoCambio(null); });
   al.addEventListener("change", () => { const d = rec(); d.al = al.value || null; if (d.al && d.dal && d.al < d.dal) d.dal = d.al; salva(); aggiornaDurata(); dopoCambio(null); });
-  $("#viaggio [data-nodate]")?.addEventListener("click", () => { tocco(); const d = rec(); d.dal = d.al = null; salva(); aggiornaDurata(); dopoCambio(null); });
+  $("#viaggio [data-nodate]")?.addEventListener("click", togliDate);
   $$("#viaggio [data-mezzo]").forEach(b => b.addEventListener("click", () => {
     tocco();
     const d = rec(), m = b.dataset.mezzo; d.mezzi = d.mezzi || [];
@@ -1376,7 +1399,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.5";
+const VERSIONE_APP = "2.6";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
