@@ -623,7 +623,7 @@ function disegnaNumeri(entrata) {
         <span class="nm"><b>${esc(x.n)}</b><small>${esc(fmtPeriodo(x.d.dal, x.d.al))}</small></span><span class="mzs">${(x.d.mezzi || []).map(m => MZ[m]?.[1] || "").join("")}</span></button>`;
     }).join("")}</div>` : ""}
     ${!S.vis.length ? `<div class="vuoto"><b>Ancora niente</b>Segna sulla mappa i paesi in cui sei stata: qui compariranno i tuoi numeri, i timbri e i traguardi.</div>` : ""}
-    <p class="about">Viatrix · i tuoi dati restano solo su questo telefono</p>`;
+    <p class="about">Viatrix · città, foto e ricordi restano su questo telefono</p>`;
   $("#b-imp").onclick = () => { tocco(); apriLivello({ tipo: "imp" }); };
   requestAnimationFrame(() => requestAnimationFrame(() => {
     $("#n-ring").style.strokeDashoffset = 100 - Math.max(S.pct > 0 ? 2 : 0, S.pct * 100);
@@ -814,7 +814,7 @@ function mostra(avanti) {
   const top = pila[pila.length - 1];
   if (!top) return;
   const sh = $("#sheet"), giaAperto = sh.classList.contains("on");
-  const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : htmlImp();
+  const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : top.tipo === "stat" ? htmlStat() : htmlImp();
   if (html == null) { indietro(); return; }
   const fai = () => {
     sh.innerHTML = `<div class="grab" data-grab></div>` + html;
@@ -1042,12 +1042,13 @@ function htmlImp() {
     <div class="opz" id="tema">${[["auto", "Automatico"], ["light", "Chiaro"], ["dark", "Scuro"]].map(([k, t]) => `<button data-tema="${k}" aria-pressed="${tema === k}">${t}</button>`).join("")}</div>
     ${installata() ? "" : `<button class="btn ghost" id="b-home" style="margin-top:16px">${ICO.aggHome} Come metterla sulla schermata Home</button>`}
     <div class="blk-h">I tuoi dati</div>
-    <p class="piccolo" style="margin-top:0">Paesi, città e foto restano <b>solo su questo telefono</b>. Ogni tanto salva una copia (per esempio su iCloud Drive): serve se cambi telefono.</p>
+    <p class="piccolo" style="margin-top:0">Città, date, foto e note restano <b>solo su questo telefono</b>. Ogni tanto salva una copia (per esempio su iCloud Drive): serve se cambi telefono.</p>
     <button class="btn pieno" id="b-salva">Salva una copia</button>
     <label class="btn ghost" style="cursor:pointer">Ripristina da una copia<input type="file" accept="application/json,.json" id="b-file" hidden></label>
     <div id="b-conf"></div>
     <button class="btn rosso" id="b-canc" style="margin-top:28px">Cancella tutto</button>
-    <p class="about">Viatrix · versione 2.2<br>Mappa: Natural Earth · Città: GeoNames</p>
+    ${statAttive() && adminDentro() ? `<button class="btn ghost" id="b-stat" style="margin-top:12px">📊 Statistiche (solo per te)</button>` : ""}
+    <p class="about" id="b-ver">Viatrix · versione ${VERSIONE_APP}<br>Mappa: Natural Earth · Città: GeoNames</p>
   </div>`;
 }
 
@@ -1071,6 +1072,7 @@ function collega(top) {
     });
   }
   if (top.tipo === "imp") collegaImp();
+  if (top.tipo === "stat") collegaStat();
 }
 function collegaLuogo(top) {
   const sh = $("#sheet");
@@ -1163,6 +1165,7 @@ function dopoCambio(c, primaS) {
   if (c && (statoPaese(c) === "v" || statoPaese(c) === "l") && primaS !== "v" && primaS !== "l") onda(c, statoPaese(c));
   aggiornaTesta();
   clearTimeout(tPremi); tPremi = setTimeout(controllaPremi, 500);
+  programmaStat();
 }
 // ogni mezzo parte a modo suo: l'aereo decolla, la nave dondola, gli scarponi saltano
 const VIAGGIO_MEZZO = {
@@ -1207,6 +1210,9 @@ function collegaImp() {
   });
   $("#b-salva").addEventListener("click", esportaCopia);
   $("#b-home")?.addEventListener("click", () => { chiudiTutto(); setTimeout(() => avvisoHome(true), 500); });
+  $("#b-stat")?.addEventListener("click", () => { tocco(); apriLivello({ tipo: "stat" }); });
+  // entrata nascosta: 5 tocchi sulla riga della versione
+  let n = 0, tn; $("#b-ver").addEventListener("click", () => { clearTimeout(tn); tn = setTimeout(() => n = 0, 1500); if (++n >= 5 && statAttive()) { n = 0; tocco(); apriLivello({ tipo: "stat" }); } });
   $("#b-file").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) chiediRipristino(f); });
   $("#b-canc").addEventListener("click", async e => {
     const b = e.currentTarget;
@@ -1319,6 +1325,7 @@ async function aggiungiFoto(k, files, top) {
   if (!n) { toast("Non riesco a leggere questa foto"); return; }
   toast(n === 1 ? "Foto aggiunta" : `${n} foto aggiunte`);
   clearTimeout(tPremi); tPremi = setTimeout(controllaPremi, 600);
+  programmaStat();
   if (pila[pila.length - 1] === top) {
     const y = $("#sheet").scrollTop;
     const box = $("#album"); const tmp = document.createElement("div"); tmp.innerHTML = htmlFoto(k);
@@ -1353,6 +1360,192 @@ function apriFoto(k, id, top) {
     setTimeout(() => { if (pila[pila.length - 1] === top) { top.scroll = $("#sheet").scrollTop; mostra(false); } }, 60);
     toast("Foto eliminata");
   };
+}
+
+/* ---------- Statistiche anonime (per Sasha) ----------
+   Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
+   quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
+   Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
+const VERSIONE_APP = "2.3";
+const FB = window.VIATRIX_FIREBASE || {};
+const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
+const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
+const leggiLS = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const scriviLS = (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} };
+const oggiISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+function idDispositivo() {
+  let id = leggiLS("viatrix-id");
+  if (!id || id.length < 20) {
+    const b = new Uint8Array(18); crypto.getRandomValues(b);
+    id = [...b].map(x => x.toString(36).padStart(2, "0")).join("").slice(0, 28);
+    scriviLS("viatrix-id", id);
+  }
+  return id;
+}
+// valori nel formato di Firestore
+const fsV = v => typeof v === "boolean" ? { booleanValue: v } : Number.isInteger(v) ? { integerValue: String(v) } : typeof v === "string" ? { stringValue: v }
+  : Array.isArray(v) ? { arrayValue: v.length ? { values: v.map(fsV) } : {} } : { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fsV(x)])) } };
+const daFS = v => !v ? null : "stringValue" in v ? v.stringValue : "integerValue" in v ? +v.integerValue : "booleanValue" in v ? v.booleanValue
+  : "arrayValue" in v ? (v.arrayValue.values || []).map(daFS) : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, daFS(x)])) : null;
+let tStat = null;
+function programmaStat(ms) { if (!FB.progetto) return; clearTimeout(tStat); tStat = setTimeout(inviaStat, ms ?? 8000); }
+async function inviaStat() {
+  if (!FB.progetto || !navigator.onLine || !PAESI.length) return;
+  try {
+    const S = statistiche();
+    const lista = s => Object.keys(S.st).filter(c => S.st[c] === s).sort();
+    if (!leggiLS("viatrix-primo")) scriviLS("viatrix-primo", oggiISO());
+    const doc = {
+      v: VERSIONE_APP, casa: installata(), os: suIOS() ? "ios" : /Android/.test(navigator.userAgent) ? "android" : "altro",
+      primo: leggiLS("viatrix-primo") || oggiISO(), ultimo: oggiISO(), aperture: Math.min(999999, +leggiLS("viatrix-aperture") || 1),
+      paesi: lista("v"), vivo: lista("l"), sogni: lista("w"),
+      citta: S.nCitta, foto: S.nFoto, giorni: Math.min(99999, S.gg), livello: livello(S.n).i, trofei: TROFEI.filter(t => t[4](S)).length,
+      mezzi: Object.fromEntries([...S.mz.entries()].slice(0, 12))
+    };
+    await fetch(FS_DOC("dispositivi/" + idDispositivo()), { method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: Object.fromEntries(Object.entries(doc).map(([k, v]) => [k, fsV(v)])) }) });
+  } catch (e) {}
+}
+
+/* Accesso di Sasha (Firebase Authentication con email e password, senza librerie) */
+let tokenAdmin = null;
+const adminDentro = () => !!leggiLS("viatrix-admin");
+async function entraAdmin(email, password) {
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(FB.chiaveWeb)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, returnSecureToken: true }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error?.message || "errore");
+  scriviLS("viatrix-admin", d.refreshToken);
+  tokenAdmin = { id: d.idToken, scade: Date.now() + (+d.expiresIn - 60) * 1000 };
+}
+async function tokenValido() {
+  if (tokenAdmin && Date.now() < tokenAdmin.scade) return tokenAdmin.id;
+  const rt = leggiLS("viatrix-admin"); if (!rt) throw new Error("fuori");
+  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(FB.chiaveWeb)}`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=refresh_token&refresh_token=" + encodeURIComponent(rt) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { if (r.status === 400) scriviLS("viatrix-admin", null); throw new Error(r.status === 400 ? "fuori" : "rete"); }
+  scriviLS("viatrix-admin", d.refresh_token);
+  tokenAdmin = { id: d.id_token, scade: Date.now() + (+d.expires_in - 60) * 1000 };
+  return tokenAdmin.id;
+}
+async function leggiDispositivi() {
+  const tok = await tokenValido(), out = [];
+  let pt = "";
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(FS_DOC("dispositivi") + `?pageSize=300${pt ? "&pageToken=" + encodeURIComponent(pt) : ""}`, { headers: { Authorization: "Bearer " + tok } });
+    if (r.status === 403) throw new Error("permesso");
+    if (!r.ok) throw new Error("rete");
+    const d = await r.json();
+    (d.documents || []).forEach(x => out.push({ id: x.name.split("/").pop(), ...Object.fromEntries(Object.entries(x.fields || {}).map(([k, v]) => [k, daFS(v)])) }));
+    if (!d.nextPageToken) break; pt = d.nextPageToken;
+  }
+  return out;
+}
+
+function htmlStat() {
+  if (!adminDentro()) return `${barraFoglio()}<div class="sh-body">
+    <h2 style="font-size:28px;margin-top:4px">Statistiche</h2>
+    <p class="piccolo" style="margin-top:6px">Sezione solo per te: entra con l'account che hai creato su Firebase.</p>
+    <form id="f-adm" class="adm-form" autocomplete="on">
+      <div class="card campi" style="grid-template-columns:1fr">
+        <div class="campo"><label for="adm-e">Email</label><input id="adm-e" type="email" autocomplete="username" required></div>
+        <div class="campo"><label for="adm-p">Password</label><input id="adm-p" type="password" autocomplete="current-password" required></div>
+      </div>
+      <button class="btn pieno" id="adm-ok" type="submit">Entra</button>
+      <p class="piccolo" id="adm-err" role="alert"></p>
+    </form></div>`;
+  return `${barraFoglio()}<div class="sh-body">
+    <div class="kicker" style="margin-top:4px">Solo per te</div><h2 style="font-size:28px">Statistiche</h2>
+    <div id="stat-box"><div class="vuoto">Carico i numeri…</div></div>
+    <button class="btn ghost" id="adm-esci" style="margin-top:22px">Esci dalle statistiche</button>
+  </div>`;
+}
+function collegaStat() {
+  const f = $("#f-adm");
+  if (f) {
+    f.addEventListener("submit", async e => {
+      e.preventDefault(); const b = $("#adm-ok"); b.disabled = true; b.textContent = "Entro…"; $("#adm-err").textContent = "";
+      try { await entraAdmin($("#adm-e").value.trim(), $("#adm-p").value); tocco(); mostra(true); }
+      catch (er) {
+        const m = String(er.message);
+        $("#adm-err").textContent = /INVALID|PASSWORD|EMAIL_NOT_FOUND|USER/.test(m) ? "Email o password sbagliate." : /TOO_MANY/.test(m) ? "Troppi tentativi: riprova tra qualche minuto." : "Non riesco a entrare: serve internet.";
+        b.disabled = false; b.textContent = "Entra";
+      }
+    });
+    return;
+  }
+  $("#adm-esci").addEventListener("click", () => { tocco(); scriviLS("viatrix-admin", null); tokenAdmin = null; indietro(); toast("Sei uscito dalle statistiche"); });
+  caricaStat();
+}
+async function caricaStat() {
+  const box = $("#stat-box");
+  let l;
+  try { l = await leggiDispositivi(); }
+  catch (e) {
+    if (!$("#stat-box")) return;
+    if (e.message === "fuori") { box.innerHTML = `<div class="vuoto">L'accesso è scaduto: esci e rientra.</div>`; return; }
+    box.innerHTML = `<div class="vuoto">${e.message === "permesso" ? "Il database non ti fa leggere: controlla le regole su Firebase." : "Non riesco a leggere i numeri: serve internet."}</div>`;
+    return;
+  }
+  if (!$("#stat-box")) return;
+  if (!l.length) { box.innerHTML = `<div class="vuoto"><b>Ancora nessuno</b>I numeri compaiono quando qualcuno apre l'app.</div>`; return; }
+  const oggi = giornoN(oggiISO()), da = s => s ? oggi - giornoN(s) : 9999;
+  const conta = k => { const m = {}; l.forEach(x => (x[k] || []).forEach(c => m[c] = (m[c] || 0) + 1)); return Object.entries(m).filter(([c]) => P[c]).sort((a, b) => b[1] - a[1] || P[a[0]].n.localeCompare(P[b[0]].n, "it")); };
+  const vis = conta("paesi"), sogni = conta("sogni"), vivo = conta("vivo");
+  const somma = k => l.reduce((a, x) => a + (+x[k] || 0), 0);
+  const nPaesi = l.reduce((a, x) => a + (x.paesi || []).length + (x.vivo || []).length, 0);
+  const mz = {}; l.forEach(x => Object.entries(x.mezzi || {}).forEach(([m, n]) => MZ[m] && (mz[m] = (mz[m] || 0) + n)));
+  const mzL = Object.entries(mz).sort((a, b) => b[1] - a[1]);
+  const liv = {}; l.forEach(x => liv[x.livello || 0] = (liv[x.livello || 0] || 0) + 1);
+  const io = idDispositivo();
+  const classifica = (righe, cv) => { const max = righe[0]?.[1] || 1; return righe.slice(0, 10).map(([c, n]) => `<div class="mz"><span class="e">${bandiera(c)}</span>
+    <div>${esc(nomeCorto(c))}<div class="barra" style="--bc:var(${cv})"><i style="--f:0" data-f="${n / max}"></i></div></div><span>${n === 1 ? "1 persona" : n + " persone"}</span></div>`).join(""); };
+  box.innerHTML = `
+    <section class="hero" style="grid-template-columns:1fr;margin-top:14px">
+      <div class="hero-t"><b class="pct">${l.length}</b><h2>${l.length === 1 ? "persona usa Viatrix" : "persone usano Viatrix"}</h2>
+      <p>${l.filter(x => da(x.ultimo) <= 7).length} attive negli ultimi 7 giorni · ${l.filter(x => x.casa).length} sulla schermata Home</p>
+      <p>${l.filter(x => da(x.primo) <= 7).length} nuove questa settimana${l.some(x => x.id === io) ? " · compreso questo telefono" : ""}</p></div>
+    </section>
+    <canvas id="stat-mappa" class="stat-mappa" aria-label="Mappa: più è scuro, più persone ci sono state"></canvas>
+    <div class="tiles">
+      ${tile("🌍", nPaesi, "paesi segnati in tutto", 1, true)}
+      ${tile("🏙️", somma("citta"), "città", 2, true)}
+      ${tile("📷", somma("foto"), "foto", 3, true)}
+      ${tile("🗓️", somma("giorni"), "giorni in viaggio", 4, true)}
+    </div>
+    ${vis.length ? `<div class="sez-h">Paesi più visitati</div><div class="cont-st mezzi-st" style="padding:14px 16px">${classifica(vis, "--v")}</div>` : ""}
+    ${sogni.length ? `<div class="sez-h">Paesi più sognati</div><div class="cont-st mezzi-st" style="padding:14px 16px">${classifica(sogni, "--w")}</div>` : ""}
+    ${vivo.length ? `<div class="sez-h">Dove vivono</div><div class="cont-st mezzi-st" style="padding:14px 16px">${classifica(vivo, "--l")}</div>` : ""}
+    <div class="sez-h">Livelli</div><div class="cont-st">${Object.keys(liv).sort((a, b) => b - a).map(i => `<div class="r"><div>${LIVELLI[i][1]} ${LIVELLI[i][2]}<span>${liv[i] === 1 ? "1 persona" : liv[i] + " persone"}</span></div></div>`).join("")}</div>
+    ${mzL.length ? `<div class="sez-h">Mezzi più usati</div><div class="cont-st mezzi-st" style="padding:14px 16px">${mzL.map(([m, n]) => `<div class="mz"><span class="e">${MZ[m][1]}</span>
+      <div>${MZ[m][2]}<div class="barra"><i style="--f:0" data-f="${n / mzL[0][1]}"></i></div></div><span>${n}</span></div>`).join("")}</div>` : ""}
+    <div class="sez-h">Telefoni</div><div class="cont-st">
+      <div class="r"><div>iPhone<span>${l.filter(x => x.os === "ios").length}</span></div></div>
+      <div class="r"><div>Android<span>${l.filter(x => x.os === "android").length}</span></div></div>
+      ${l.some(x => x.os === "altro") ? `<div class="r"><div>Computer o altro<span>${l.filter(x => x.os === "altro").length}</span></div></div>` : ""}
+      <div class="r"><div>Con la versione ${VERSIONE_APP}<span>${l.filter(x => x.v === VERSIONE_APP).length} di ${l.length}</span></div></div></div>
+    <p class="piccolo">Numeri anonimi: niente nomi, città, date, foto o note. Si aggiornano quando qualcuno apre l'app.</p>`;
+  requestAnimationFrame(() => requestAnimationFrame(() => $$("#stat-box .barra i").forEach(b => b.style.setProperty("--f", b.dataset.f))));
+  $$("#stat-box .tile b[data-n]").forEach(b => contaSu(b, 0, +b.dataset.n, x => Math.round(x).toLocaleString("it-IT")));
+  disegnaMappaStat(Object.fromEntries(vis.concat(vivo.map(([c, n]) => [c, n + (Object.fromEntries(vis)[c] || 0)]))));
+}
+// piccola mappa del mondo: più persone ci sono state, più il paese è scuro
+function disegnaMappaStat(conti) {
+  const cv = $("#stat-mappa"); if (!cv || !M.feats.length) return;
+  const w = cv.clientWidth || 340, dpr = Math.min(3, devicePixelRatio || 1);
+  let [x0, y0, x1, y1] = [1e9, 1e9, -1e9, -1e9];
+  M.feats.forEach(f => { x0 = Math.min(x0, f.b[0][0]); y0 = Math.min(y0, f.b[0][1]); x1 = Math.max(x1, f.b[1][0]); y1 = Math.max(y1, f.b[1][1]); });
+  const s = (w - 16) / (x1 - x0), h = Math.round((y1 - y0) * s + 16);
+  cv.width = w * dpr; cv.height = h * dpr; cv.style.height = h + "px";
+  const ctx = cv.getContext("2d"), max = Math.max(1, ...Object.values(conti));
+  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * (8 - x0 * s), dpr * (8 - y0 * s));
+  ctx.lineWidth = .6 / s; ctx.strokeStyle = COL.line; ctx.lineJoin = "round";
+  for (const f of M.feats) {
+    const n = conti[f.c] || 0;
+    ctx.fillStyle = n ? d3.interpolateRgb(COL.land, COL.v)(.35 + .65 * n / max) : COL.land;
+    ctx.fill(f.p); ctx.stroke(f.p);
+  }
 }
 
 /* ---------- Avviso: mettila sulla schermata Home ----------
@@ -1412,7 +1605,7 @@ document.addEventListener("focusin", e => {
   setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), 320);
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { leggiColori(); richiedi(); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); else if (tStat) { clearTimeout(tStat); tStat = null; inviaStat(); } });
 
 (async () => {
   leggiColori();
@@ -1443,6 +1636,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) glob
   aggiornaTesta();
   if (!Array.isArray(dati.visti)) controllaPremi();
   setTimeout(() => { if (!pila.length) avvisoHome(); }, 2400);
+  scriviLS("viatrix-aperture", String((+leggiLS("viatrix-aperture") || 0) + 1));
+  programmaStat(3000);
 })();
 
 if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude|anthropic/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
