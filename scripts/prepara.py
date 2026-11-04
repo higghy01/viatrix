@@ -3,6 +3,7 @@
 Uso: python prepara.py <cartella dei file scaricati> <cartella dell'app>
 File da scaricare nella prima cartella:
   countries-50m.json   https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json
+  countries-110m.json  https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json
   wc.json              https://cdn.jsdelivr.net/npm/world-countries@5.1.0/countries.json
   cities5000.zip, cities1000.zip, admin1CodesASCII.txt   https://download.geonames.org/export/dump/
   alt_it.tsv           nomi italiani, da alternateNamesV2.zip (stesso indirizzo):
@@ -89,3 +90,15 @@ for g in t["objects"]["countries"]["geometries"]:
 t["objects"]["countries"]["geometries"] = geo
 t["objects"].pop("land", None)
 json.dump(t, open(f"{OUT}/data/mondo.json", "w"), separators=(",", ":"))
+
+# globo piccolo (Numeri): Natural Earth 1:110m, stessi codici
+t = json.load(open(f"{SRC}/countries-110m.json"))
+geo = []
+for g in t["objects"]["countries"]["geometries"]:
+    cc = byn.get(g.get("id")) or NOMI.get(g["properties"]["name"])
+    if not cc: continue
+    g.pop("id", None); g["properties"] = {"c": cc}
+    geo.append(g)
+t["objects"]["countries"]["geometries"] = geo
+t["objects"].pop("land", None)
+json.dump(t, open(f"{OUT}/data/globo.json", "w"), separators=(",", ":"))

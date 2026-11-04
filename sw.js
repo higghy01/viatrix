@@ -1,8 +1,8 @@
 /* Copia dell'app sul telefono: si apre anche senza rete.
    A ogni modifica dei file alzare VERSIONE, altrimenti il telefono resta sulla vecchia. */
-const VERSIONE = "viatrix-v1";
-const FILE = ["./", "index.html", "stile.css?v=1", "app.js?v=1", "lib/d3.min.js", "lib/topojson-client.min.js",
-  "data/paesi.json", "data/mondo.json", "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
+const VERSIONE = "viatrix-v2";
+const FILE = ["./", "index.html", "stile.css?v=2", "app.js?v=2", "lib/d3.min.js", "lib/topojson-client.min.js",
+  "data/paesi.json", "data/mondo.json", "data/globo.json", "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSIONE).then(c => c.addAll(FILE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {
   // solo le copie di Viatrix: sullo stesso indirizzo (higghy01.github.io) ci sono anche altre app

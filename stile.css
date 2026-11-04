@@ -308,3 +308,120 @@ textarea.nota{width:100%;min-height:84px;border-radius:16px;border:1px solid var
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* ===== Versione 2: più festa =====
+   Mappa con le coste chiare, foglio a metà che lascia vedere il paese, coriandoli, livelli, timbri e traguardi. */
+:root{--shelf:#EAF4FB;--oro-1:#FFD66B;--oro-2:#F0AE2E}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--shelf:#15263A}}
+:root[data-theme="dark"]{--shelf:#15263A}
+@property --tinta{syntax:"<color>";inherits:true;initial-value:transparent}
+
+/* entrata dell'app */
+html.avvio .m-card{animation:vx-scende .8s var(--ios) both .15s}
+html.avvio .leg{animation:vx-sale .6s var(--ios) both;animation-delay:calc(.9s + var(--i,0)*80ms)}
+html.avvio .tabbar{animation:vx-su .8s var(--ios) both .3s}
+html.avvio .m-btn{animation:vx-appare .6s ease both 1s}
+@keyframes vx-scende{from{opacity:0;transform:translateY(-24px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes vx-su{from{opacity:0;transform:translate(-50%,40px)}to{opacity:1;transform:translateX(-50%)}}
+@keyframes vx-appare{from{opacity:0}to{opacity:1}}
+.m-ring .fg{stroke:url(#g-pct)}
+.m-top,.m-btn,.m-hint{transition:opacity .35s,transform .5s var(--ios)}
+
+/* foglio a metà: sopra resta la mappa col paese */
+.sheet{--tinta:transparent;transition:transform .55s var(--ios),--tinta .6s ease;
+  background:radial-gradient(130% 380px at 0% 0%,color-mix(in srgb,var(--tinta) 22%,transparent),transparent 70%),var(--bg)}
+.sheet.meta.on{transform:translateY(40%)}
+.sheet.meta .sh-body{padding-bottom:42vh}
+.sheet.meta .grab{cursor:pointer;width:44px;padding:0;box-sizing:content-box;border-top:8px solid transparent;border-bottom:8px solid transparent;background-clip:padding-box;margin-top:-8px}
+.scrim.trasp{background:transparent}
+html.meta .m-top{opacity:0;transform:translateY(-30px);pointer-events:none}
+html.meta .m-btn,html.meta .m-hint{opacity:0;pointer-events:none}
+html.meta .tabbar{transform:translate(-50%,140%);opacity:0}
+.p-head .flag{display:inline-block;animation:vx-bandiera .8s cubic-bezier(.34,1.56,.64,1) both .1s;filter:drop-shadow(0 4px 8px rgba(0,0,0,.15))}
+@keyframes vx-bandiera{from{opacity:0;transform:scale(.4) rotate(-20deg)}to{opacity:1;transform:none}}
+
+/* scelta: il pulsante si riempie del suo colore */
+.seg button{position:relative;overflow:hidden}
+.seg button[aria-pressed="true"]{background:var(--c);border-color:var(--c);color:#fff;box-shadow:0 8px 22px color-mix(in srgb,var(--c) 40%,transparent)}
+.seg button[data-stato="w"][aria-pressed="true"]{color:#4A3200}
+.seg button[aria-pressed="true"] .e{transform:scale(1.15) rotate(-6deg);filter:drop-shadow(0 2px 3px rgba(0,0,0,.2))}
+.chip-m .e{display:inline-block}
+
+/* mini mappa che si disegna */
+.mini{box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--ink) 10%,transparent)}
+.mini .vic{animation:vx-appare .5s ease both}
+.mini .qui{stroke:var(--ink);stroke-opacity:.4;stroke-width:1.6;stroke-dasharray:1;stroke-dashoffset:0;animation:vx-traccia 1.1s cubic-bezier(.5,0,.3,1) both,vx-riempi .7s ease both .55s}
+@keyframes vx-traccia{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes vx-riempi{from{fill-opacity:0}to{fill-opacity:1}}
+.mini .cit{transform-box:fill-box;transform-origin:center;animation:vx-pop .55s cubic-bezier(.34,1.56,.64,1) both;animation-delay:calc(.75s + var(--i,0)*70ms)}
+.mini .cit.sel{animation:vx-pop .55s cubic-bezier(.34,1.56,.64,1) both .75s,vx-punto 1.6s var(--ease) 1.4s infinite}
+.mini .lbl{animation:vx-appare .5s ease both 1.1s}
+@keyframes vx-pop{from{transform:scale(0)}to{transform:scale(1)}}
+
+/* coriandoli e premi */
+canvas.festa{position:fixed;inset:0;width:100%;height:100%;z-index:44;pointer-events:none}
+.premio{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:46;display:flex;align-items:center;gap:14px;
+  width:min(380px,calc(100% - 24px));padding:12px 18px 12px 12px;border-radius:24px;color:#fff;
+  background:linear-gradient(135deg,#1B2740,#2A1F3D);box-shadow:0 18px 50px rgba(10,15,30,.35),inset 0 0 0 .5px rgba(255,255,255,.15);
+  transform:translate(-50%,-150%) scale(.9);opacity:0;transition:transform .6s cubic-bezier(.34,1.3,.64,1),opacity .3s;cursor:pointer}
+.premio.on{transform:translate(-50%,0);opacity:1}
+.premio .pe{font-size:34px;width:56px;height:56px;border-radius:18px;display:grid;place-items:center;flex:none;background:rgba(255,255,255,.1)}
+.premio.on .pe{animation:vx-premio .9s cubic-bezier(.34,1.56,.64,1) both .15s}
+@keyframes vx-premio{0%{transform:scale(.3) rotate(-30deg)}60%{transform:scale(1.25) rotate(8deg)}100%{transform:none}}
+.premio small{display:block;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--oro-1)}
+.premio b{display:block;font-family:var(--display);font-size:20px;line-height:1.15}
+.premio span{font-size:13.5px;opacity:.8}
+.premio.grande{background:linear-gradient(135deg,#3B1F5E,#C2452E 120%);padding:16px 20px 16px 14px}
+.premio.grande .pe{width:64px;height:64px;font-size:40px;background:linear-gradient(135deg,var(--oro-1),var(--oro-2))}
+.premio.grande b{font-size:23px}
+
+/* Numeri */
+.hero{grid-template-columns:132px 1fr;background:linear-gradient(145deg,var(--surface) 40%,color-mix(in srgb,var(--w) 14%,var(--surface)))}
+.ring-wrap{width:132px;height:132px;position:relative;display:grid;place-items:center}
+.ring-wrap .big-ring{position:absolute;inset:0;width:132px;height:132px}
+.big-ring circle{stroke-width:7}
+.big-ring .fg{stroke:url(#g-ring)}
+#globo{position:relative;border-radius:50%;touch-action:none;cursor:grab;box-shadow:0 6px 18px rgba(20,32,51,.18)}
+.hero-t .pct{display:block;font-family:var(--display);font-size:40px;line-height:1;font-weight:800;font-variant-numeric:tabular-nums;
+  background:linear-gradient(135deg,var(--w),var(--v));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-t h2{font-size:18px;margin-top:4px}
+.hero-t p{margin:5px 0 0;font-size:13.5px}
+.hero-t .terra{margin-top:2px}
+.liv{margin-top:10px;background:var(--surface);border-radius:22px;box-shadow:var(--shadow);padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
+.liv-e{font-size:34px;width:60px;height:60px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,color-mix(in srgb,var(--oro-1) 45%,var(--surface)),color-mix(in srgb,var(--oro-2) 30%,var(--surface)));animation:vx-galleggia 3.2s ease-in-out infinite}
+.liv-t small{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft)}
+.liv-t b{display:block;font-family:var(--display);font-size:21px;line-height:1.15;margin-bottom:8px}
+.liv-t .barra{margin:0 0 6px;height:8px;border-radius:4px}
+.liv-t span{font-size:13px;color:var(--ink-soft)}
+.barra i{background:linear-gradient(90deg,var(--w),var(--v))}
+.barra.oro i{background:linear-gradient(90deg,var(--oro-1),var(--oro-2))}
+.mz .barra i{background:linear-gradient(90deg,color-mix(in srgb,var(--l) 55%,#fff),var(--l))}
+.ce{margin-right:7px}
+.cont-h h2 .ce{font-size:19px}
+.sez-h{margin-top:30px}
+
+.passaporto{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 10px;padding:16px 12px;border-radius:22px;
+  background:repeating-linear-gradient(0deg,transparent 0 27px,color-mix(in srgb,var(--ink) 5%,transparent) 27px 28px),color-mix(in srgb,var(--l) 7%,var(--surface));box-shadow:var(--shadow)}
+.timbro{aspect-ratio:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:6px;color:var(--c);
+  border:2.5px dashed color-mix(in srgb,var(--c) 75%,transparent);border-radius:16px;transform:rotate(var(--r));text-align:center;
+  background:radial-gradient(circle,color-mix(in srgb,var(--c) 10%,transparent),transparent 72%);transition:transform .45s var(--spring)}
+.timbro.f1{border-radius:50%;border-style:double;border-width:4px}
+.timbro.f2{border-radius:8px;border-style:solid;border-width:2px;box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
+.timbro:active{transform:rotate(var(--r)) scale(.93);transition-duration:.1s}
+.timbro .tf{font-size:26px;line-height:1.1}
+.timbro b{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timbro small{font-size:10.5px;font-weight:700;letter-spacing:.05em;opacity:.85;font-variant-numeric:tabular-nums}
+.timbro.stampa{animation:vx-timbro .55s cubic-bezier(.34,1.4,.64,1) both;animation-delay:calc(.2s + var(--i)*70ms)}
+@keyframes vx-timbro{from{opacity:0;transform:rotate(calc(var(--r) + 14deg)) scale(1.7)}60%{opacity:1}to{opacity:1;transform:rotate(var(--r)) scale(1)}}
+
+.trofei{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.trofeo{background:var(--surface);border-radius:18px;padding:12px 8px 10px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px;box-shadow:var(--shadow);min-width:0}
+.trofeo .te{font-size:26px;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);margin-bottom:4px;filter:grayscale(1);opacity:.55}
+.trofeo b{font-size:12.5px;line-height:1.2}
+.trofeo small{font-size:11px;color:var(--ink-soft);line-height:1.25}
+.trofeo:not(.ok) b{color:var(--ink-soft)}
+.trofeo.ok .te{filter:none;opacity:1;background:linear-gradient(135deg,var(--oro-1),var(--oro-2));box-shadow:0 4px 12px color-mix(in srgb,var(--oro-2) 40%,transparent);position:relative;overflow:hidden}
+.trofeo.ok .te::after{content:"";position:absolute;inset:-40%;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.65) 50%,transparent 60%);transform:translateX(-120%);animation:vx-luccica 4.5s ease-in-out infinite;animation-delay:calc(var(--i)*.3s)}
+@keyframes vx-luccica{0%,70%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+
+@media (prefers-reduced-motion:reduce){.trofeo.ok .te::after,.liv-e{animation:none}}

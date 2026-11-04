@@ -130,7 +130,7 @@ const nGiorni = n => n === 1 ? "1 giorno" : `${n} giorni`;
 let COL = {};
 function leggiColori() {
   const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
-  COL = { land: g("--land"), line: g("--land-line"), v: g("--v"), l: g("--l"), w: g("--w"), ink: g("--ink"), ocean: g("--ocean"), ocean2: g("--ocean-2"), surface: g("--surface") };
+  COL = { shelf: g("--shelf"), land: g("--land"), line: g("--land-line"), v: g("--v"), l: g("--l"), w: g("--w"), ink: g("--ink"), ocean: g("--ocean"), ocean2: g("--ocean-2"), surface: g("--surface") };
 }
 const colore = s => s ? COL[s] : COL.land;
 
@@ -139,8 +139,10 @@ const colore = s => s ? COL[s] : COL.land;
    Disegnata su canvas: i paesi sono preparati una volta sola (Path2D),
    poi a ogni movimento si ridisegna solo con un'altra scala: fluida anche col pinch.
    ===================================================================== */
-const M = { feats: [], byC: {}, W: 0, H: 0, dpr: 1, t: d3.zoomIdentity, raf: 0, anim: new Map(), onde: [], flash: null };
+const M = { feats: [], byC: {}, W: 0, H: 0, dpr: 1, t: d3.zoomIdentity, raf: 0, anim: new Map(), onde: [], flash: null, main: {}, tw: {}, scelto: null, intro: null };
 let MONDO = null;
+const NOMI_CORTI = { US: "Stati Uniti", GB: "Regno Unito", CD: "RD Congo", CF: "Centrafrica", DO: "Rep. Dominicana", BA: "Bosnia", AE: "Emirati Arabi", SA: "Arabia Saudita", PG: "Papua N. Guinea", KP: "Corea del Nord", KR: "Corea del Sud", MK: "Macedonia del Nord", TT: "Trinidad e Tobago", GQ: "Guinea Equat." };
+const nomeCorto = c => NOMI_CORTI[c] || P[c]?.n || c;
 function preparaMappa() {
   const box = $("#mappa");
   box.innerHTML = `<canvas id="cv"></canvas>`;
@@ -165,7 +167,7 @@ function misura() {
   const top = Math.min(150, H * .2), bot = Math.min(110, H * .14);
   const proj = d3.geoNaturalEarth1().fitExtent([[10, top], [W - 10, H - bot]], fc);
   const gp = d3.geoPath(proj);
-  M.proj = proj;
+  M.proj = proj; M.gp = gp; M.main = {};
   M.feats = MONDO.map(f => {
     const b = gp.bounds(f);
     return { c: f.properties.c, f, p: new Path2D(gp(f) || ""), b, a: (b[1][0] - b[0][0]) * (b[1][1] - b[0][1]), cen: proj(d3.geoCentroid(f)) };
@@ -176,6 +178,24 @@ function misura() {
   M.grat = new Path2D(gp(d3.geoGraticule10()));
   M.zoom && M.zoom.extent([[0, 0], [W, H]]).translateExtent([[-W * .3, -H * .1], [W * 1.3, H * 1.1]]);
   richiedi();
+}
+/* La parte principale di un paese (senza territori lontani): per inquadrarlo e per il nome */
+function parteMain(c) {
+  const fs = (MONDO || []).filter(f => f.properties.c === c);
+  if (!fs.length) return null;
+  const polys = [];
+  fs.forEach(x => { const g = x.geometry; (g.type === "Polygon" ? [g.coordinates] : g.coordinates).forEach(co => polys.push({ type: "Polygon", coordinates: co })); });
+  polys.forEach(q => { q.ar = d3.geoArea(q); q.ce = d3.geoCentroid(q); });
+  const big = polys.reduce((a, q) => q.ar > a.ar ? q : a);
+  return { type: "GeometryCollection", geometries: polys.filter(q => q === big || (q.ar > big.ar * .004 && d3.geoDistance(q.ce, big.ce) < .22)), big };
+}
+function main(c) {
+  if (M.main[c]) return M.main[c];
+  const g = parteMain(c);
+  let r = null;
+  if (g) { const b = M.gp.bounds(g); r = { b, lbl: M.proj(d3.geoCentroid(g.big)) }; }
+  else if (P[c]) { const xy = M.proj([P[c].ll[1], P[c].ll[0]]); r = { b: [[xy[0] - 1, xy[1] - 1], [xy[0] + 1, xy[1] + 1]], lbl: xy }; }
+  return (M.main[c] = r);
 }
 const richiedi = () => { if (!M.raf) M.raf = requestAnimationFrame(disegna); };
 // paesi piccoli o senza forma (Malta, Vaticano, isole): un pallino se sono segnati
@@ -192,27 +212,49 @@ function puntiPiccoli(st) {
   }
   return out;
 }
+const chiaro = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
 function disegna(now) {
   M.raf = 0;
   const { ctx, dpr, t, W, H } = M;
   now = now || performance.now();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  // entrata: i paesi compaiono a onda dal centro, poi si colorano quelli segnati
+  let ip = 1;
+  if (M.intro) { ip = (now - M.intro) / 1500; if (ip >= 1) { M.intro = null; ip = 1; } }
   ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
   // globo e reticolo leggero
-  ctx.fillStyle = COL.ocean; ctx.globalAlpha = .55; ctx.fill(M.sfera); ctx.globalAlpha = 1;
-  ctx.lineWidth = .8 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .06; ctx.stroke(M.grat); ctx.globalAlpha = 1;
+  ctx.globalAlpha = .55 * chiaro(ip, 0, .3); ctx.fillStyle = COL.ocean; ctx.fill(M.sfera);
+  ctx.lineWidth = .8 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .06 * chiaro(ip, 0, .3); ctx.stroke(M.grat); ctx.globalAlpha = 1;
   // paesi (solo quelli che si vedono)
   const x0 = -t.x / t.k, y0 = -t.y / t.k, x1 = (W - t.x) / t.k, y1 = (H - t.y) / t.k;
   const st = M.st || {};
-  let vivo = false;
-  ctx.lineWidth = .7 / t.k; ctx.strokeStyle = COL.line; ctx.lineJoin = "round";
-  for (const f of M.feats) {
-    if (f.b[1][0] < x0 || f.b[0][0] > x1 || f.b[1][1] < y0 || f.b[0][1] > y1) continue;
-    const a = M.anim.get(f.c);
+  let vivo = !!M.intro;
+  const vis = M.feats.filter(f => !(f.b[1][0] < x0 || f.b[0][0] > x1 || f.b[1][1] < y0 || f.b[0][1] > y1));
+  const cx = W / 2, cy = H / 2, dmax = Math.hypot(cx, cy);
+  const ritardo = f => Math.hypot(f.cen[0] * t.k + t.x - cx, f.cen[1] * t.k + t.y - cy) / dmax;
+  // piattaforma chiara intorno alle coste (come le carte nautiche)
+  ctx.lineJoin = "round"; ctx.lineWidth = 7 / t.k; ctx.strokeStyle = COL.shelf;
+  ctx.globalAlpha = chiaro(ip, .1, .5);
+  for (const f of vis) ctx.stroke(f.p);
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = .7 / t.k; ctx.strokeStyle = COL.line;
+  for (const f of vis) {
     let col = colore(st[f.c]);
-    if (a) { const k = Math.min(1, (now - a.t0) / 700); col = d3.interpolateRgb(a.da, col)(d3.easeCubicOut(k)); if (k < 1) vivo = true; else M.anim.delete(f.c); }
+    if (M.intro) {
+      const d = ritardo(f);
+      ctx.globalAlpha = chiaro(ip, d * .35, d * .35 + .25);
+      if (st[f.c]) col = d3.interpolateRgb(COL.land, col)(d3.easeCubicOut(chiaro(ip, .45 + d * .3, .7 + d * .3)));
+    }
+    const a = M.anim.get(f.c);
+    if (a) { const k = Math.min(1, Math.max(0, (now - a.t0) / 700)); col = d3.interpolateRgb(a.da, col)(d3.easeCubicOut(k)); if (k < 1) vivo = true; else M.anim.delete(f.c); }
     ctx.fillStyle = col; ctx.fill(f.p); ctx.stroke(f.p);
+  }
+  ctx.globalAlpha = 1;
+  // paese scelto (foglio aperto): contorno marcato
+  if (M.scelto && M.byC[M.scelto]) {
+    ctx.lineWidth = 2.2 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .75;
+    M.byC[M.scelto].forEach(f => ctx.stroke(f.p)); ctx.globalAlpha = 1;
   }
   // tocco: il paese si illumina un attimo
   if (M.flash) {
@@ -220,19 +262,53 @@ function disegna(now) {
     if (k < 1) { ctx.globalAlpha = .35 * (1 - k); ctx.fillStyle = "#fff"; (M.byC[M.flash.c] || []).forEach(f => ctx.fill(f.p)); ctx.globalAlpha = 1; vivo = true; } else M.flash = null;
   }
   // pallini dei paesi piccoli (grandezza fissa sullo schermo)
-  for (const d of puntiPiccoli(st)) {
+  if (!M.intro || ip > .6) for (const d of puntiPiccoli(st)) {
     ctx.beginPath(); ctx.arc(d.xy[0], d.xy[1], 4.5 / t.k, 0, 7);
     ctx.fillStyle = COL[d.s]; ctx.fill(); ctx.lineWidth = 1.5 / t.k; ctx.strokeStyle = COL.line; ctx.stroke();
   }
   // onde quando si segna un paese nuovo
   M.onde = M.onde.filter(o => {
-    const k = (now - o.t0) / 1100; if (k >= 1) return false;
+    const k = (now - o.t0) / 1300; if (k >= 1) return false;
     vivo = true; if (k < 0) return true;
-    const e = d3.easeCubicOut(k);
-    ctx.beginPath(); ctx.arc(o.xy[0], o.xy[1], (8 + 70 * e) / t.k, 0, 7);
-    ctx.lineWidth = 2.5 / t.k; ctx.strokeStyle = COL[o.s]; ctx.globalAlpha = 1 - k; ctx.stroke(); ctx.globalAlpha = 1;
-    vivo = true; return true;
+    for (const r of [0, .18]) {
+      const kk = k - r; if (kk <= 0) continue;
+      const e = d3.easeCubicOut(Math.min(1, kk / (1 - r)));
+      ctx.beginPath(); ctx.arc(o.xy[0], o.xy[1], (6 + 80 * e) / t.k, 0, 7);
+      ctx.lineWidth = (3 - 2 * e) / t.k; ctx.strokeStyle = COL[o.s]; ctx.globalAlpha = (1 - e) * .9; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    return true;
   });
+  // la città aperta: un segnaposto sulla mappa grande
+  if (M.pin) {
+    const [px, py] = M.proj([M.pin.ll[1], M.pin.ll[0]]);
+    ctx.beginPath(); ctx.arc(px, py, 8 / t.k, 0, 7); ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, 5 / t.k, 0, 7); ctx.fillStyle = COL[M.pin.s]; ctx.fill();
+    ctx.lineWidth = 1 / t.k; ctx.strokeStyle = "rgba(0,0,0,.25)"; ctx.beginPath(); ctx.arc(px, py, 8 / t.k, 0, 7); ctx.stroke();
+  }
+  // nomi dei paesi quando si ingrandisce
+  if (t.k >= 2.2 && !M.intro) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = "600 11.5px -apple-system, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    const fatti = new Set();
+    for (const f of vis) {
+      if (fatti.has(f.c)) continue; fatti.add(f.c);
+      const m = main(f.c); if (!m) continue;
+      const w = (m.b[1][0] - m.b[0][0]) * t.k, h = (m.b[1][1] - m.b[0][1]) * t.k;
+      const nome = nomeCorto(f.c);
+      const tw = M.tw[f.c] || (M.tw[f.c] = ctx.measureText(nome).width);
+      if (w < tw + 10 || h < 16) continue;
+      const x = m.lbl[0] * t.k + t.x, y = m.lbl[1] * t.k + t.y;
+      if (x < -50 || x > W + 50 || y < 0 || y > H) continue;
+      const s = st[f.c];
+      ctx.globalAlpha = Math.min(1, (t.k - 2.2) * 2) * (s ? .95 : .55);
+      ctx.fillStyle = s ? "#fff" : COL.ink;
+      if (s) { ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.18)"; ctx.strokeText(nome, x, y); }
+      ctx.fillText(nome, x, y);
+    }
+    ctx.globalAlpha = 1;
+  }
   if (vivo) richiedi();
 }
 function cambiaColore(c, primaS) {
@@ -242,9 +318,8 @@ function cambiaColore(c, primaS) {
 }
 function onda(c, s) {
   if (pocoMoto()) return;
-  const fs = M.byC[c], p = P[c];
-  const xy = fs ? fs.reduce((a, x) => x.a > a.a ? x : a).cen : p && M.proj([p.ll[1], p.ll[0]]);
-  if (xy) { M.onde.push({ xy, s, t0: performance.now() + 250 }); richiedi(); }
+  const m = main(c);
+  if (m) { M.onde.push({ xy: [(m.b[0][0] + m.b[1][0]) / 2, (m.b[0][1] + m.b[1][1]) / 2], s, t0: performance.now() + 150 }); richiedi(); }
 }
 function tocca(e) {
   if (e.defaultPrevented) return;
@@ -265,26 +340,46 @@ function tocca(e) {
   if (!hit || !P[hit]) return;
   tocco();
   M.flash = { c: hit, t0: performance.now() }; richiedi();
-  setTimeout(() => apriLivello({ tipo: "paese", c: hit }), 90);
+  setTimeout(() => apriLivello({ tipo: "paese", c: hit, meta: true }), 90);
+}
+// la parte di mappa che resta visibile sopra il foglio a metà
+const META = .4;
+function areaLibera(meta) {
+  const sat = parseFloat(getComputedStyle($(".m-top")).paddingTop) - 10 || 0;
+  const top = sat + 18, bottom = meta ? M.H - (M.H - sat - 22) * (1 - META) - 14 : M.H - Math.min(110, M.H * .14);
+  return { x0: 24, x1: M.W - 24, y0: top, y1: Math.max(top + 60, bottom) };
+}
+function volaA(b, meta, kMax) {
+  if (!M.sel) return;
+  const A = areaLibera(meta);
+  const bw = Math.max(1, b[1][0] - b[0][0]), bh = Math.max(1, b[1][1] - b[0][1]);
+  const k = Math.max(1, Math.min(kMax || 30, Math.min((A.x1 - A.x0) / bw, (A.y1 - A.y0) / bh) * .82));
+  const T = d3.zoomIdentity.translate((A.x0 + A.x1) / 2, (A.y0 + A.y1) / 2).scale(k).translate(-(b[0][0] + b[1][0]) / 2, -(b[0][1] + b[1][1]) / 2);
+  M.sel.interrupt().transition().duration(pocoMoto() ? 0 : 900).ease(d3.easeCubicInOut).call(M.zoom.transform, T);
+}
+function volaAPaese(c, meta) { const m = main(c); if (m) volaA(m.b, meta); }
+function volaACitta(x, meta) {
+  const m = main(x.c); if (!x.ll || !m) return volaAPaese(x.c, meta);
+  const xy = M.proj([x.ll[1], x.ll[0]]);
+  const d = Math.max(m.b[1][0] - m.b[0][0], m.b[1][1] - m.b[0][1]) / 5;
+  volaA([[xy[0] - d, xy[1] - d], [xy[0] + d, xy[1] + d]], meta, 45);
 }
 function vediTutto() {
   tocco();
-  M.sel.transition().duration(pocoMoto() ? 0 : 750).ease(d3.easeCubicInOut).call(M.zoom.transform, d3.zoomIdentity);
+  M.sel.interrupt().transition().duration(pocoMoto() ? 0 : 750).ease(d3.easeCubicInOut).call(M.zoom.transform, d3.zoomIdentity);
 }
 // all'apertura: i paesi segnati in vista, oppure l'Europa
 function vistaIniziale() {
   const st = M.st || {};
-  let fs = M.feats.filter(f => st[f.c] === "v" || st[f.c] === "l");
-  if (!fs.length) fs = M.byC.IT || [];
-  // per i paesi con territori lontani (Francia, Stati Uniti…) basta la forma più grande
-  const tenuti = Object.values(fs.reduce((m, f) => { if (!m[f.c] || f.a > m[f.c].a) m[f.c] = f; return m; }, {}));
-  if (!tenuti.length) return;
+  let cs = Object.keys(st).filter(c => st[c] === "v" || st[c] === "l");
+  if (!cs.length) cs = ["IT"];
   let [x0, y0, x1, y1] = [1e9, 1e9, -1e9, -1e9];
-  tenuti.forEach(f => { x0 = Math.min(x0, f.b[0][0]); y0 = Math.min(y0, f.b[0][1]); x1 = Math.max(x1, f.b[1][0]); y1 = Math.max(y1, f.b[1][1]); });
+  cs.forEach(c => { const m = main(c); if (!m) return; x0 = Math.min(x0, m.b[0][0]); y0 = Math.min(y0, m.b[0][1]); x1 = Math.max(x1, m.b[1][0]); y1 = Math.max(y1, m.b[1][1]); });
+  if (x0 > x1) return;
   const { W, H } = M, top = Math.min(150, H * .2), bot = Math.min(110, H * .14);
   const pad = 40, aw = W - 2 * pad, ah = H - top - bot - 2 * pad;
   let k = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0));
-  k = Math.max(1, Math.min(st && Object.keys(st).length ? 5 : 3.2, k * .9));
+  k = Math.max(1, Math.min(Object.keys(st).length ? 5 : 3.2, k * .9));
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   M.sel.call(M.zoom.transform, d3.zoomIdentity.translate(W / 2, top + pad + ah / 2).scale(k).translate(-cx, -cy));
 }
@@ -297,12 +392,15 @@ function aggiornaTesta() {
   if (pctPrima !== pct) {
     contaSu(n, pctPrima < 0 ? 0 : pctPrima * 100, pct * 100, v => pctTesto(v / 100));
     $("#m-ring").style.strokeDashoffset = 100 - Math.max(pct > 0 ? 2 : 0, pct * 100);
+    if (pctPrima >= 0 && !pocoMoto()) $("#m-pct").animate([{ transform: "scale(1)" }, { transform: "scale(1.12)" }, { transform: "scale(1)" }], { duration: 600, easing: "cubic-bezier(.34,1.56,.64,1)", delay: 250 });
     pctPrima = pct;
   }
+  const lv = livello(k.onu.length);
+  $("#m-liv").textContent = `${lv.e} ${lv.t}`;
   $("#m-sub").textContent = `${k.onu.length} su ${k.tot} paesi`;
-  $("#legenda").innerHTML = ["v", "l", "w"].map(s => {
+  $("#legenda").innerHTML = ["v", "l", "w"].map((s, i) => {
     const n = s === "v" ? k.vis.length - k.l : s === "l" ? k.l : k.w;
-    return n ? `<span class="leg" style="--c:var(${STATI[s].cv})"><i></i>${STATI[s].t} <b>${n}</b></span>` : "";
+    return n ? `<span class="leg" style="--c:var(${STATI[s].cv});--i:${i}"><i></i>${STATI[s].t} <b>${n}</b></span>` : "";
   }).join("");
   $("#m-hint").classList.toggle("via", Object.keys(k.st).length > 0);
 }
@@ -375,7 +473,7 @@ function elencoPaesi(entrata) {
     const lista = tutti.filter(p => (filtro === "tutti" || st[p.c] === filtro) && (!cerca || norm(p.n).includes(cerca) || norm(p.cap).includes(cerca) || p.c.toLowerCase() === cerca));
     if (!lista.length) continue;
     const onu = tutti.filter(p => p.o), fatti = onu.filter(p => st[p.c] === "v" || st[p.c] === "l").length;
-    html += `<section class="cont${entrata ? " entra" : ""}" style="--i:${Math.min(i++, 5)}"><div class="cont-h"><h2>${CONT[k]}</h2>${onu.length ? `<small>${fatti} di ${onu.length} · ${pctTesto(fatti / onu.length)}</small>` : ""}</div>
+    html += `<section class="cont${entrata ? " entra" : ""}" style="--i:${Math.min(i++, 5)}"><div class="cont-h"><h2><span class="ce">${EMOJI_CONT[k]}</span>${CONT[k]}</h2>${onu.length ? `<small>${fatti} di ${onu.length} · ${pctTesto(fatti / onu.length)}</small>` : ""}</div>
       ${onu.length ? `<div class="barra"><i style="--f:${entrata ? 0 : fatti / onu.length}" data-f="${fatti / onu.length}"></i></div>` : ""}
       <div class="lista">${lista.map(p => rigaPaese(p, st[p.c], cc[p.c])).join("")}</div></section>`;
   }
@@ -390,8 +488,39 @@ function rigaPaese(p, s, nc) {
 }
 
 /* ---------- Numeri ---------- */
-function disegnaNumeri(entrata) {
-  const k = conti(), v = $("#v-numeri");
+const LIVELLI = [[0, "🧳", "Pronta a partire"], [1, "📍", "Prima tappa"], [3, "📸", "Turista"], [6, "🎒", "Viaggiatrice"], [10, "🧭", "Esploratrice"],
+  [20, "🌍", "Giramondo"], [35, "✈️", "Globetrotter"], [50, "⛵", "Navigatrice"], [80, "🏆", "Leggenda"], [120, "🌐", "Cittadina del mondo"]];
+function livello(n) {
+  let i = 0; while (i + 1 < LIVELLI.length && n >= LIVELLI[i + 1][0]) i++;
+  const [min, e, t] = LIVELLI[i], nx = LIVELLI[i + 1];
+  return { i, e, t, min, next: nx ? { n: nx[0], e: nx[1], t: nx[2] } : null };
+}
+const TROFEI = [
+  ["primo", "🚩", "Primo paese", "Il primo paese sulla mappa", S => S.n >= 1],
+  ["casa", "🏡", "Casa mia", "Segna dove vivi", S => S.l >= 1],
+  ["cinque", "🖐️", "Cinque paesi", "5 paesi visitati", S => S.n >= 5],
+  ["dieci", "🔟", "Dieci paesi", "10 paesi visitati", S => S.n >= 10],
+  ["venticinque", "🎖️", "Venticinque", "25 paesi visitati", S => S.n >= 25],
+  ["cinquanta", "🏅", "Cinquanta", "50 paesi visitati", S => S.n >= 50],
+  ["cont2", "🗺️", "Due continenti", "Paesi in 2 continenti", S => S.nCont >= 2],
+  ["cont4", "🧭", "Quattro continenti", "Paesi in 4 continenti", S => S.nCont >= 4],
+  ["cont6", "🌐", "Tutto il mondo", "Tutti e 6 i continenti", S => S.nCont >= 6],
+  ["oceania", "🦘", "Agli antipodi", "Un paese in Oceania", S => S.contSet.has("oc")],
+  ["citta", "🏙️", "Prima città", "Aggiungi una città", S => S.nCitta >= 1],
+  ["citta10", "🌆", "Dieci città", "10 città visitate", S => S.nCitta >= 10],
+  ["citta50", "🏰", "Cinquanta città", "50 città visitate", S => S.nCitta >= 50],
+  ["foto", "📷", "Primo ricordo", "Aggiungi una foto", S => S.nFoto >= 1],
+  ["foto25", "🖼️", "Album pieno", "25 foto", S => S.nFoto >= 25],
+  ["sogni", "✨", "Sognatrice", "5 paesi in Vorrei andarci", S => S.w >= 5],
+  ["settimana", "🗓️", "Una settimana via", "7 giorni in viaggio", S => S.gg >= 7],
+  ["mese", "🌙", "Un mese in giro", "30 giorni in viaggio", S => S.gg >= 30],
+  ["volo", "✈️", "In volo", "Un viaggio in aereo", S => S.mz.has("aereo")],
+  ["binari", "🚆", "Sui binari", "Un viaggio in treno", S => S.mz.has("treno")],
+  ["mare", "⛴️", "Per mare", "Un viaggio in nave", S => S.mz.has("nave")],
+  ["strada", "🚗", "Su strada", "Auto, camper o moto", S => ["auto", "camper", "moto"].some(m => S.mz.has(m))]
+];
+function statistiche() {
+  const k = conti();
   const citta = Object.values(dati.citta).filter(x => x.s === "v" || x.s === "l");
   const nFoto = [...FOTO.values()].reduce((a, l) => a + l.length, 0);
   // giorni in viaggio: unione dei periodi (senza contare due volte paese e città dello stesso viaggio)
@@ -402,32 +531,74 @@ function disegnaNumeri(entrata) {
     const onu = PAESI.filter(p => p.k === c && p.o); const f = onu.filter(p => k.st[p.c] === "v" || k.st[p.c] === "l").length;
     return { c, f, n: onu.length };
   });
-  const nCont = cont.filter(x => x.f).length;
-  const mz = {};
-  [...Object.values(dati.paesi), ...Object.values(dati.citta)].forEach(x => (x.mezzi || []).forEach(m => mz[m] = (mz[m] || 0) + 1));
-  const mzL = Object.entries(mz).filter(([m]) => MZ[m]).sort((a, b) => b[1] - a[1]);
+  const mz = new Map();
+  [...Object.values(dati.paesi), ...Object.values(dati.citta)].filter(x => x.s !== "w").forEach(x => (x.mezzi || []).forEach(m => MZ[m] && mz.set(m, (mz.get(m) || 0) + 1)));
+  return { ...k, n: k.onu.length, nCitta: citta.length, nFoto, gg, per, cont, nCont: cont.filter(x => x.f).length,
+    contSet: new Set(cont.filter(x => x.f).map(x => x.c)), mz, anno: per.length ? new Date(per[0][0] * 864e5).getUTCFullYear() : null };
+}
+
+/* Premi: nuovo livello o traguardo → festa (una alla volta) */
+function controllaPremi() {
+  const S = statistiche();
+  const ora = TROFEI.filter(t => t[4](S)).map(t => t[0]);
+  const lv = livello(S.n);
+  if (!Array.isArray(dati.visti)) { dati.visti = ora; dati.liv = lv.i; salva(); return; }
+  const nuovi = ora.filter(id => !dati.visti.includes(id));
+  const su = lv.i > (dati.liv || 0);
+  if (!nuovi.length && !su) return;
+  dati.visti = [...dati.visti, ...nuovi]; if (su) dati.liv = lv.i;
+  salva();
+  if (su) festeggia({ e: lv.e, k: "Nuovo livello", t: lv.t, d: lv.next ? `Prossimo: ${lv.next.t} a ${lv.next.n} paesi` : "Il livello più alto!", grande: true });
+  nuovi.forEach(id => { const t = TROFEI.find(x => x[0] === id); festeggia({ e: t[1], k: "Traguardo", t: t[2], d: t[3] }); });
+}
+
+let globo = null;
+async function disegnaNumeri(entrata) {
+  const S = statistiche(), v = $("#v-numeri");
+  const lv = livello(S.n);
+  const mzL = [...S.mz.entries()].sort((a, b) => b[1] - a[1]);
   const mzMax = mzL.length ? mzL[0][1] : 1;
   const ultimi = [...Object.entries(dati.paesi).map(([c, d]) => ({ tipo: "paese", c, d, n: P[c]?.n })), ...Object.values(dati.citta).map(d => ({ tipo: "citta", c: d.c, d, n: d.n }))]
     .filter(x => x.d.dal && x.n && x.d.s !== "w").sort((a, b) => (b.d.dal || "").localeCompare(a.d.dal || "")).slice(0, 8);
-  const anni = per.length ? new Date(per[0][0] * 864e5).getUTCFullYear() : null;
+  const ok = new Set(TROFEI.filter(t => t[4](S)).map(t => t[0]));
+  // timbri del passaporto: ogni paese visitato, con l'anno del primo viaggio
+  const annoDi = c => { const ds = [dati.paesi[c]?.dal, ...cittaDi(c).map(x => x.dal)].filter(Boolean).sort(); return ds[0] ? ds[0].slice(0, 4) : ""; };
+  const timbri = S.vis.map(p => ({ p, s: S.st[p.c], a: annoDi(p.c) })).sort((a, b) => (a.a || "9999").localeCompare(b.a || "9999") || a.p.n.localeCompare(b.p.n, "it"));
+  const seme = c => (c.charCodeAt(0) * 31 + c.charCodeAt(1) * 7) % 100;
+  const prog = lv.next ? (S.n - lv.min) / (lv.next.n - lv.min) : 1;
+  const ent = entrata ? " entra" : "";
 
-  v.innerHTML = `<header class="top"><div><div class="kicker">${anni ? `In viaggio dal ${anni}` : "Il mio mondo"}</div><h1>Numeri</h1></div>
+  v.innerHTML = `<header class="top"><div><div class="kicker">${S.anno ? `In viaggio dal ${S.anno}` : "Il mio mondo"}</div><h1>Numeri</h1></div>
       <button class="round-btn" id="b-imp" aria-label="Impostazioni">${ICO.ingr}</button></header>
-    <section class="hero${entrata ? " entra" : ""}">
-      <div class="ring-wrap"><svg class="big-ring" viewBox="0 0 120 120"><circle class="bg" cx="60" cy="60" r="50"/>
-        <circle class="fg" id="n-ring" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
-        <div class="in"><b id="n-pct">0%</b></div></div>
-      <div><h2>del mondo visitato</h2><p>${k.onu.length} paesi su ${k.tot}${nCont ? ` · ${nCont === 1 ? "1 continente" : nCont + " continenti"}` : ""}</p>
-      <p>${pctTesto(k.area)} della terra emersa</p></div>
+    <section class="hero${ent}">
+      <div class="ring-wrap"><svg class="big-ring" viewBox="0 0 120 120" aria-hidden="true">
+        <defs><linearGradient id="g-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--w)"/><stop offset="1" stop-color="var(--v)"/></linearGradient></defs>
+        <circle class="bg" cx="60" cy="60" r="54"/><circle class="fg" id="n-ring" cx="60" cy="60" r="54" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
+        <canvas id="globo" aria-label="Il mondo con i paesi visitati: trascina per girarlo"></canvas></div>
+      <div class="hero-t"><b class="pct" id="n-pct">0%</b><h2>del mondo visitato</h2>
+        <p>${S.n} paesi su ${S.tot}${S.nCont ? ` · ${S.nCont === 1 ? "1 continente" : S.nCont + " continenti"}` : ""}</p>
+        <p class="terra">${pctTesto(S.area)} della terra emersa</p></div>
+    </section>
+    <section class="liv${ent}" style="--i:1">
+      <span class="liv-e">${lv.e}</span>
+      <div class="liv-t"><small>Livello ${lv.i + 1}</small><b>${lv.t}</b>
+        <div class="barra oro"><i style="--f:0" data-f="${prog}"></i></div>
+        <span>${lv.next ? `Ancora ${lv.next.n - S.n === 1 ? "1 paese" : lv.next.n - S.n + " paesi"} per diventare ${lv.next.t} ${lv.next.e}` : "Hai raggiunto il livello più alto"}</span></div>
     </section>
     <div class="tiles">
-      ${tile("🏙️", citta.length, "città", 1, entrata)}
-      ${tile("🗓️", gg, gg === 1 ? "giorno in viaggio" : "giorni in viaggio", 2, entrata)}
-      ${tile("📷", nFoto, "foto", 3, entrata)}
-      ${tile("✨", k.w, k.w === 1 ? "paese da vedere" : "paesi da vedere", 4, entrata)}
+      ${tile("🏙️", S.nCitta, "città", 2, entrata)}
+      ${tile("🗓️", S.gg, S.gg === 1 ? "giorno in viaggio" : "giorni in viaggio", 3, entrata)}
+      ${tile("📷", S.nFoto, "foto", 4, entrata)}
+      ${tile("✨", S.w, S.w === 1 ? "paese da sognare" : "paesi da sognare", 5, entrata)}
     </div>
+    ${timbri.length ? `<div class="sez-h">Il mio passaporto <small>${timbri.length === 1 ? "1 timbro" : timbri.length + " timbri"}</small></div>
+    <div class="passaporto">${timbri.map((x, i) => { const h = seme(x.p.c);
+      return `<button class="timbro f${h % 3}${entrata ? " stampa" : ""}" data-paese="${x.p.c}" style="--r:${(h % 9) - 4}deg;--c:var(${STATI[x.s].cv});--i:${Math.min(i, 12)}">
+        <span class="tf">${bandiera(x.p.c)}</span><b>${esc(nomeCorto(x.p.c))}</b><small>${x.s === "l" ? "casa" : x.a || "visitato"}</small></button>`; }).join("")}</div>` : ""}
+    <div class="sez-h">Traguardi <small>${ok.size} di ${TROFEI.length}</small></div>
+    <div class="trofei">${TROFEI.map((t, i) => `<div class="trofeo${ok.has(t[0]) ? " ok" : ""}${entrata ? " entra" : ""}" style="--i:${Math.min(i, 10)}"><span class="te">${ok.has(t[0]) ? t[1] : "🔒"}</span><b>${t[2]}</b><small>${t[3]}</small></div>`).join("")}</div>
     <div class="sez-h">Continenti</div>
-    <div class="cont-st${entrata ? " entra" : ""}" style="--i:3">${cont.map(x => `<div class="r"><div>${CONT[x.c]}<span>${x.f} di ${x.n}</span></div>
+    <div class="cont-st">${S.cont.map(x => `<div class="r"><div><span class="ce">${EMOJI_CONT[x.c]}</span>${CONT[x.c]}<span>${x.f} di ${x.n}</span></div>
       <div class="barra"><i style="--f:0" data-f="${x.f / x.n}"></i></div></div>`).join("")}</div>
     ${mzL.length ? `<div class="sez-h">Come viaggi</div><div class="cont-st mezzi-st" style="padding:14px 16px">${mzL.map(([m, n]) => `<div class="mz"><span class="e">${MZ[m][1]}</span>
       <div>${MZ[m][2]}<div class="barra"><i style="--f:0" data-f="${n / mzMax}"></i></div></div><span>${n}</span></div>`).join("")}</div>` : ""}
@@ -436,17 +607,136 @@ function disegnaNumeri(entrata) {
       return `<button class="vg" ${x.tipo === "paese" ? `data-paese="${x.c}"` : `data-citta="${esc(x.d.id)}"`}><span class="ic">${f ? `<img src="${f.mini}" alt="">` : bandiera(x.c)}</span>
         <span class="nm"><b>${esc(x.n)}</b><small>${esc(fmtPeriodo(x.d.dal, x.d.al))}</small></span><span class="mzs">${(x.d.mezzi || []).map(m => MZ[m]?.[1] || "").join("")}</span></button>`;
     }).join("")}</div>` : ""}
-    ${!k.vis.length ? `<div class="vuoto"><b>Ancora niente</b>Segna sulla mappa i paesi in cui sei stata: qui compariranno i tuoi numeri.</div>` : ""}
+    ${!S.vis.length ? `<div class="vuoto"><b>Ancora niente</b>Segna sulla mappa i paesi in cui sei stata: qui compariranno i tuoi numeri, i timbri e i traguardi.</div>` : ""}
     <p class="about">Viatrix · i tuoi dati restano solo su questo telefono</p>`;
   $("#b-imp").onclick = () => { tocco(); apriLivello({ tipo: "imp" }); };
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    $("#n-ring").style.strokeDashoffset = 100 - Math.max(k.pct > 0 ? 2 : 0, k.pct * 100);
+    $("#n-ring").style.strokeDashoffset = 100 - Math.max(S.pct > 0 ? 2 : 0, S.pct * 100);
     $$("#v-numeri .barra i").forEach(b => b.style.setProperty("--f", b.dataset.f));
   }));
-  contaSu($("#n-pct"), entrata ? 0 : k.pct * 100, k.pct * 100, x => pctTesto(x / 100));
+  contaSu($("#n-pct"), entrata ? 0 : S.pct * 100, S.pct * 100, x => pctTesto(x / 100));
   if (entrata) $$("#v-numeri .tile b[data-n]").forEach(b => contaSu(b, 0, +b.dataset.n, x => Math.round(x).toLocaleString("it-IT")));
+  avviaGlobo(S.st);
 }
+const EMOJI_CONT = { eu: "🏰", as: "🏯", af: "🦁", na: "🗽", sa: "🦜", oc: "🐨", an: "🐧" };
 const tile = (e, n, t, i, entrata) => `<div class="tile${entrata ? " entra" : ""}" style="--i:${i}"><span class="e">${e}</span><b data-n="${n}">${n.toLocaleString("it-IT")}</b><span>${t}</span></div>`;
+
+/* Il globo che gira (Numeri): Natural Earth 1:110m, si trascina col dito */
+let GLOBO = null;
+async function avviaGlobo(st) {
+  const cv = $("#globo"); if (!cv) return;
+  if (!GLOBO) { try { const t = await (await fetch("data/globo.json")).json(); GLOBO = topojson.feature(t, t.objects.countries).features; } catch (e) { return; } }
+  if (!cv.isConnected) return;
+  const size = 104, dpr = Math.min(3, devicePixelRatio || 1);
+  cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + "px";
+  const ctx = cv.getContext("2d");
+  const proj = d3.geoOrthographic().scale(size / 2 - 1).translate([size / 2, size / 2]).clipAngle(90).precision(.6);
+  const gp = d3.geoPath(proj, ctx);
+  // si parte con i paesi visitati davanti
+  const vis = GLOBO.filter(f => st[f.properties.c] === "v" || st[f.properties.c] === "l");
+  const ce = vis.length ? d3.geoCentroid({ type: "FeatureCollection", features: vis }) : [12, 42];
+  const g = globo = { cv, rot: [-ce[0] + 25, -Math.max(-35, Math.min(35, ce[1])) * .7], vel: pocoMoto() ? 0 : .012, drag: null, raf: 0, last: 0 };
+  const grat = d3.geoGraticule10();
+  const disegnaG = () => {
+    proj.rotate(g.rot);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, size, size);
+    ctx.beginPath(); gp({ type: "Sphere" }); ctx.fillStyle = COL.ocean2; ctx.fill();
+    ctx.beginPath(); gp(grat); ctx.strokeStyle = COL.ink; ctx.globalAlpha = .07; ctx.lineWidth = .5; ctx.stroke(); ctx.globalAlpha = 1;
+    for (const f of GLOBO) { ctx.beginPath(); gp(f); ctx.fillStyle = colore(st[f.properties.c]); ctx.fill(); }
+    ctx.beginPath(); gp({ type: "Sphere" }); ctx.lineWidth = 1; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .12; ctx.stroke(); ctx.globalAlpha = 1;
+    // luce: riflesso in alto a sinistra e ombra in basso a destra
+    const lg = ctx.createRadialGradient(size * .32, size * .28, 2, size * .5, size * .5, size * .55);
+    lg.addColorStop(0, "rgba(255,255,255,.35)"); lg.addColorStop(.5, "rgba(255,255,255,0)"); lg.addColorStop(1, "rgba(0,0,0,.18)");
+    ctx.beginPath(); gp({ type: "Sphere" }); ctx.fillStyle = lg; ctx.fill();
+  };
+  const giro = now => {
+    g.raf = 0;
+    if (globo !== g || !cv.isConnected || tabAttiva !== "numeri" || document.hidden) { disegnaG(); return; }
+    const dt = Math.min(50, now - (g.last || now)); g.last = now;
+    if (!g.drag) g.rot[0] += g.vel * dt;
+    disegnaG();
+    if (g.vel || g.drag) g.raf = requestAnimationFrame(giro);
+  };
+  g.riparti = () => { if (!g.raf) { g.last = 0; g.raf = requestAnimationFrame(giro); } };
+  cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId); g.drag = { x: e.clientX, y: e.clientY, r: [...g.rot] }; g.riparti(); };
+  cv.onpointermove = e => { if (!g.drag) return; g.rot[0] = g.drag.r[0] + (e.clientX - g.drag.x) * .7; g.rot[1] = Math.max(-60, Math.min(60, g.drag.r[1] - (e.clientY - g.drag.y) * .7)); };
+  cv.onpointerup = cv.onpointercancel = () => { g.drag = null; };
+  disegnaG(); g.riparti();
+}
+
+/* ---------- Festa: coriandoli e premi ---------- */
+const FX = { cv: null, ctx: null, pz: [], raf: 0, last: 0 };
+function coriandoli(x, y, o = {}) {
+  if (pocoMoto()) return;
+  if (!FX.cv) { FX.cv = document.createElement("canvas"); FX.cv.className = "festa"; FX.cv.setAttribute("aria-hidden", "true"); document.body.appendChild(FX.cv); FX.ctx = FX.cv.getContext("2d"); }
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  if (FX.cv.width !== innerWidth * dpr || FX.cv.height !== innerHeight * dpr) { FX.cv.width = innerWidth * dpr; FX.cv.height = innerHeight * dpr; }
+  FX.dpr = dpr;
+  const cols = o.colori || [COL.v, COL.l, COL.w, "#5B8CFF", "#FF7AB6", "#FFFFFF"];
+  const n = o.n || 80, now = performance.now();
+  for (let i = 0; i < n; i++) {
+    const piove = o.pioggia;
+    const ang = -Math.PI / 2 + (Math.random() - .5) * (o.apertura || 1.7);
+    const sp = piove ? 0 : (o.forza || 9) * (.45 + Math.random() * .75);
+    FX.pz.push({ x: piove ? Math.random() * innerWidth : x, y: piove ? -20 - Math.random() * 200 : y,
+      vx: piove ? (Math.random() - .5) * 2 : Math.cos(ang) * sp, vy: piove ? 1 + Math.random() * 2 : Math.sin(ang) * sp,
+      g: piove ? .06 : .26, rot: Math.random() * 6, vr: (Math.random() - .5) * .35, s: o.stelle ? 7 + Math.random() * 7 : 5 + Math.random() * 5,
+      c: cols[i % cols.length], f: o.stelle ? "s" : Math.random() < .6 ? "r" : "c", t0: now + (piove ? Math.random() * 500 : 0), life: (piove ? 2600 : 1500) + Math.random() * 700 });
+  }
+  if (!FX.raf) { FX.last = now; FX.raf = requestAnimationFrame(passoFX); }
+}
+function stella(ctx, s) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const r = i % 2 ? s * .42 : s, a = i * Math.PI / 5 - Math.PI / 2; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  ctx.closePath(); ctx.fill();
+}
+function passoFX(now) {
+  const { ctx, dpr } = FX, dt = Math.min(34, now - FX.last) / 16.67; FX.last = now;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, FX.cv.width, FX.cv.height);
+  FX.pz = FX.pz.filter(p => {
+    const age = now - p.t0; if (age < 0) return true;
+    if (age > p.life || p.y > innerHeight + 30) return false;
+    p.vx *= Math.pow(.985, dt); p.vy = p.vy * Math.pow(.985, dt) + p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+    ctx.setTransform(dpr, 0, 0, dpr, p.x * dpr, p.y * dpr); ctx.rotate(p.rot);
+    ctx.globalAlpha = 1 - chiaro(age, p.life * .7, p.life);
+    ctx.fillStyle = p.c;
+    if (p.f === "s") stella(ctx, p.s / 2);
+    else if (p.f === "c") { ctx.beginPath(); ctx.arc(0, 0, p.s / 3, 0, 7); ctx.fill(); }
+    else { ctx.scale(1, Math.cos(p.rot * 2.3)); ctx.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); }
+    return true;
+  });
+  ctx.globalAlpha = 1;
+  FX.raf = FX.pz.length ? requestAnimationFrame(passoFX) : 0;
+  if (!FX.raf) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, FX.cv.width, FX.cv.height); }
+}
+const coda = [];
+let premioOn = false;
+function festeggia(p) {
+  // un nuovo paese sostituisce quello ancora in attesa; in coda al massimo 3 premi
+  if (p.paese) for (let i = coda.length - 1; i >= 0; i--) if (coda[i].paese) coda.splice(i, 1);
+  coda.push(p);
+  while (coda.length > 3) coda.splice(coda.findIndex(x => !x.grande), 1);
+  if (!premioOn) prossimoPremio();
+}
+function prossimoPremio() {
+  const p = coda.shift();
+  if (!p) { premioOn = false; return; }
+  premioOn = true;
+  let el = $("#premio");
+  if (!el) { el = document.createElement("div"); el.id = "premio"; el.className = "premio"; el.setAttribute("role", "status"); document.body.appendChild(el); el.onclick = () => chiudiPremio(); }
+  el.innerHTML = `<span class="pe">${p.e}</span><div><small>${esc(p.k)}</small><b>${esc(p.t)}</b><span>${esc(p.d || "")}</span></div>`;
+  el.classList.toggle("grande", !!p.grande);
+  el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
+  tocco();
+  if (p.grande) coriandoli(0, 0, { pioggia: true, n: 140 });
+  else { const r = el.getBoundingClientRect(); coriandoli(r.left + 34, r.top + r.height / 2, { n: 40, forza: 7, apertura: 3 }); }
+  clearTimeout(el._t); el._t = setTimeout(chiudiPremio, p.grande ? 3000 : 2200);
+}
+function chiudiPremio() {
+  const el = $("#premio"); if (!el) return;
+  clearTimeout(el._t); el.classList.remove("on");
+  setTimeout(prossimoPremio, 420);
+}
 
 /* =====================================================================
    FOGLI DAL BASSO (a livelli: paese → città → …)
@@ -477,6 +767,32 @@ function sfondo(on) {
   document.documentElement.classList.toggle("aperto", on);
   COLORI_BARRA.forEach(([m]) => { if (on) { m.dataset.c = m.content; m.content = "#000000"; } else if (m.dataset.c) m.content = m.dataset.c; });
 }
+/* Foglio a metà (aperto dalla mappa): sopra si vede il paese, che si colora dal vivo */
+function modoFoglio(top) {
+  const sh = $("#sheet"), root = document.documentElement;
+  const meta = !!top.meta && (top.tipo === "paese" || top.tipo === "citta");
+  sh.classList.toggle("meta", meta); root.classList.toggle("meta", meta);
+  $("#scrim").classList.toggle("trasp", meta);
+  sfondo(!meta);
+  const c = top.tipo === "paese" ? top.c : top.tipo === "citta" ? dati.citta[top.id]?.c : null;
+  M.scelto = meta ? c : null;
+  const x = top.tipo === "citta" ? dati.citta[top.id] : null;
+  M.pin = meta && x && x.ll ? { ll: x.ll, s: x.s || "w" } : null;
+  richiedi();
+  if (meta && c && tabAttiva === "mappa") { if (top.tipo === "paese") volaAPaese(c, true); else volaACitta(dati.citta[top.id], true); }
+  tingi(top);
+}
+function tingi(top) {
+  const c = top.tipo === "paese" ? top.c : top.tipo === "citta" ? dati.citta[top.id]?.c : null;
+  const s = top.tipo === "citta" ? dati.citta[top.id]?.s : c ? statoPaese(c) : null;
+  $("#sheet").style.setProperty("--tinta", s ? `var(${STATI[s].cv})` : "transparent");
+  if (M.pin && top.tipo === "citta") { M.pin.s = s || "w"; richiedi(); }
+}
+function espandi() {
+  const top = pila[pila.length - 1];
+  if (!top || !top.meta) return;
+  tocco(); top.meta = false; modoFoglio(top);
+}
 function mostra(avanti) {
   const top = pila[pila.length - 1];
   if (!top) return;
@@ -484,13 +800,14 @@ function mostra(avanti) {
   const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : htmlImp();
   if (html == null) { indietro(); return; }
   const fai = () => {
-    sh.innerHTML = `<div class="grab"></div>` + html;
+    sh.innerHTML = `<div class="grab" data-grab></div>` + html;
     sh.scrollTop = top.scroll || 0;
     collega(top);
   };
+  modoFoglio(top);
   if (!giaAperto) {
     fai();
-    $("#scrim").classList.add("on"); sfondo(true);
+    $("#scrim").classList.add("on");
     requestAnimationFrame(() => sh.classList.add("on"));
   } else if (pocoMoto() || !sh.animate) fai();
   else {
@@ -503,6 +820,8 @@ function mostra(avanti) {
 }
 function chiudiFoglio() {
   pila.length = 0;
+  document.documentElement.classList.remove("meta");
+  M.scelto = null; M.pin = null; richiedi();
   $("#sheet").classList.remove("on");
   $("#scrim").classList.remove("on");
   sfondo(false);
@@ -523,8 +842,9 @@ $("#sheet").addEventListener("scroll", () => { const top = pila[pila.length - 1]
     const y = e.touches[0].clientY; dy = y - y0;
     const dt = Math.max(1, e.timeStamp - t0); vel = (y - yPrima) / dt; yPrima = y; t0 = e.timeStamp;
     if (dy > 0) {
-      sh.classList.add("drag"); root.classList.add("trascina");
-      sh.style.transform = `translateY(${dy}px)`;
+      const meta = sh.classList.contains("meta");
+      sh.classList.add("drag"); if (!meta) root.classList.add("trascina");
+      sh.style.transform = meta ? `translateY(calc(${META * 100}% + ${dy}px))` : `translateY(${dy}px)`;
       root.style.setProperty("--p", Math.max(0, 1 - dy / Math.max(300, sh.offsetHeight)).toFixed(3));
     } else if (sh.classList.contains("drag")) { sh.classList.remove("drag"); root.classList.remove("trascina"); sh.style.transform = ""; root.style.removeProperty("--p"); }
   }, { passive: true });
@@ -576,15 +896,7 @@ function miniMappa(c, selId) {
   const W = 640, H = 400;
   const fs = M.byC[c] || [];
   // si inquadra la parte principale del paese (niente territori lontani: Guyana francese, Hawaii…)
-  let obiettivo;
-  if (fs.length) {
-    const polys = [];
-    fs.forEach(x => { const g = x.f.geometry; (g.type === "Polygon" ? [g.coordinates] : g.coordinates).forEach(co => polys.push({ type: "Polygon", coordinates: co })); });
-    polys.forEach(q => { q.ar = d3.geoArea(q); q.ce = d3.geoCentroid(q); });
-    const big = polys.reduce((a, q) => q.ar > a.ar ? q : a);
-    const vicini = polys.filter(q => q === big || (q.ar > big.ar * .004 && d3.geoDistance(q.ce, big.ce) < .22));
-    obiettivo = { type: "GeometryCollection", geometries: vicini };
-  } else obiettivo = d3.geoCircle().center([p.ll[1], p.ll[0]]).radius(1.2)();
+  const obiettivo = fs.length ? parteMain(c) : d3.geoCircle().center([p.ll[1], p.ll[0]]).radius(1.2)();
   const ce = d3.geoCentroid(obiettivo);
   const proj = d3.geoMercator().rotate([-ce[0], 0]).fitExtent([[36, 36], [W - 36, H - 36]], obiettivo);
   // se il paese è piccolissimo, un po' di contorno
@@ -600,8 +912,8 @@ function miniMappa(c, selId) {
   const etichette = pts.length <= 8 || selId;
   return `<div class="mini"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
     ${altri.map(f => `<path class="vic" d="${gp(f.f)}"/>`).join("")}
-    ${fs.length ? fs.map(f => `<path class="qui${s ? " s-" + s : ""}" d="${gp(f.f)}"/>`).join("") : `<circle class="qui${s ? " s-" + s : ""}" cx="${proj([p.ll[1], p.ll[0]])[0]}" cy="${proj([p.ll[1], p.ll[0]])[1]}" r="14"/>`}
-    ${pts.map(o => `<circle class="cit s-${o.x.s || "w"}${o.x.id === selId ? " sel" : ""}" cx="${o.xy[0].toFixed(1)}" cy="${o.xy[1].toFixed(1)}" r="${o.x.id === selId ? 10 : 7}"/>`).join("")}
+    ${fs.length ? fs.map(f => `<path class="qui${s ? " s-" + s : ""}" pathLength="1" d="${gp(f.f)}"/>`).join("") : `<circle class="qui${s ? " s-" + s : ""}" cx="${proj([p.ll[1], p.ll[0]])[0]}" cy="${proj([p.ll[1], p.ll[0]])[1]}" r="14"/>`}
+    ${pts.map((o, i) => `<circle style="--i:${Math.min(i, 10)}" class="cit s-${o.x.s || "w"}${o.x.id === selId ? " sel" : ""}" cx="${o.xy[0].toFixed(1)}" cy="${o.xy[1].toFixed(1)}" r="${o.x.id === selId ? 10 : 7}"/>`).join("")}
     ${etichette ? pts.filter(o => !selId || o.x.id === selId || pts.length <= 8).map(o => `<text class="lbl" x="${(o.xy[0] + 16).toFixed(1)}" y="${(o.xy[1] + 7).toFixed(1)}" ${o.xy[0] > W - 180 ? `text-anchor="end" dx="-32"` : ""}>${esc(o.x.n)}</text>`).join("") : ""}
   </svg></div>`;
 }
@@ -696,7 +1008,7 @@ function scegliCitta(c, x) {
     dopoCambio(c, prima);
   }
   tocco();
-  sostituisciLivello({ tipo: "citta", id });
+  sostituisciLivello({ tipo: "citta", id, meta: !!pila[pila.length - 2]?.meta });
 }
 
 /* ---------- Impostazioni ---------- */
@@ -721,6 +1033,7 @@ function collega(top) {
   const sh = $("#sheet");
   sh.querySelector("[data-chiudi]")?.addEventListener("click", () => { tocco(); chiudiTutto(); });
   sh.querySelector("[data-back]")?.addEventListener("click", () => { tocco(); indietro(); });
+  sh.querySelector("[data-grab]")?.addEventListener("click", espandi);
   if (top.tipo === "paese" || top.tipo === "citta") collegaLuogo(top);
   if (top.tipo === "scegli") {
     const c = top.c;
@@ -756,9 +1069,20 @@ function collegaLuogo(top) {
     vb.innerHTML = nuovo; collegaViaggio(rec);
     if (nuovo && !cera && vb.animate && !pocoMoto()) vb.animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: 420, easing: MOLLA });
     aggiornaMini(top);
+    tingi(top);
+    // la festa: coriandoli dal pulsante, stelline per i sogni
+    if (d.s && !pocoMoto()) {
+      const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 3;
+      if (d.s === "w") coriandoli(x, y, { stelle: true, n: 22, forza: 7, colori: [COL.w, "#FFE08A", "#FFC94D"] });
+      else coriandoli(x, y, { n: 70 });
+      const em = b.querySelector(".e"); em && em.animate([{ transform: "scale(1)" }, { transform: "scale(1.6) rotate(-12deg)", offset: .35 }, { transform: "scale(.9) rotate(4deg)", offset: .7 }, { transform: "scale(1.15) rotate(-6deg)" }], { duration: 650, easing: "ease-out" });
+    }
+    const dopo = statoPaese(c);
+    if ((dopo === "v" || dopo === "l") && prima !== "v" && prima !== "l") {
+      const k = conti();
+      festeggia({ paese: true, e: bandiera(c), k: dopo === "l" ? "Casa tua" : "Nuovo paese", t: P[c].n, d: k.pct > primaPct ? `Ora sei al ${pctTesto(k.pct)} del mondo` : "È sulla tua mappa" });
+    }
     dopoCambio(c, prima);
-    const dopo = statoPaese(c), k = conti();
-    if ((dopo === "v" || dopo === "l") && prima !== "v" && prima !== "l") toast(k.pct > primaPct ? `🎉 Nuovo paese! Ora sei al ${pctTesto(k.pct)} del mondo` : `🎉 ${paese ? P[c].n : dati.citta[top.id].n} è sulla tua mappa`);
   });
   collegaViaggio(rec);
   // foto
@@ -768,7 +1092,7 @@ function collegaLuogo(top) {
   let tn; $("#f-nota").addEventListener("input", e => { clearTimeout(tn); tn = setTimeout(() => { rec().nota = e.target.value.slice(0, 2000); if (paese) pulisciVuoto(c); salva(); }, 300); });
   if (paese) {
     sh.querySelector("[data-aggiungi]").addEventListener("click", () => { tocco(); apriLivello({ tipo: "scegli", c }); });
-    sh.querySelectorAll(".citta [data-citta]").forEach(b => b.addEventListener("click", () => { tocco(); apriLivello({ tipo: "citta", id: b.dataset.citta }); }));
+    sh.querySelectorAll(".citta [data-citta]").forEach(b => b.addEventListener("click", () => { tocco(); apriLivello({ tipo: "citta", id: b.dataset.citta, meta: top.meta }); }));
   } else {
     $("#b-togli").addEventListener("click", async e => {
       const b = e.currentTarget;
@@ -798,7 +1122,7 @@ function collegaViaggio(rec) {
     const d = rec(), m = b.dataset.mezzo; d.mezzi = d.mezzi || [];
     d.mezzi = d.mezzi.includes(m) ? d.mezzi.filter(x => x !== m) : [...d.mezzi, m];
     b.setAttribute("aria-pressed", d.mezzi.includes(m));
-    const e = b.querySelector(".e"); if (e && e.animate && !pocoMoto() && d.mezzi.includes(m)) e.animate([{ transform: "scale(1)" }, { transform: "scale(1.35) rotate(-8deg)" }, { transform: "scale(1)" }], { duration: 420, easing: "ease-out" });
+    const e = b.querySelector(".e"); if (e && e.animate && !pocoMoto() && d.mezzi.includes(m)) e.animate(VIAGGIO_MEZZO[m] || VIAGGIO_MEZZO.auto, { duration: 700, easing: "cubic-bezier(.3,.7,.3,1)" });
     salva(); dopoCambio(null);
   }));
 }
@@ -810,11 +1134,21 @@ function aggiornaMini(top) {
   if (top.tipo === "citta") { const x = dati.citta[top.id]; box.querySelectorAll(".cit.sel").forEach(q => { q.classList.remove("s-v", "s-l", "s-w"); q.classList.add("s-" + (x.s || "w")); }); }
 }
 // dopo ogni modifica: colori della mappa e riepilogo (le liste si ridisegnano quando si chiude il foglio)
+let tPremi = null;
 function dopoCambio(c, primaS) {
   if (c) cambiaColore(c, primaS);
   if (c && (statoPaese(c) === "v" || statoPaese(c) === "l") && primaS !== "v" && primaS !== "l") onda(c, statoPaese(c));
   aggiornaTesta();
+  clearTimeout(tPremi); tPremi = setTimeout(controllaPremi, 500);
 }
+// ogni mezzo parte a modo suo: l'aereo decolla, la nave dondola, gli scarponi saltano
+const VIAGGIO_MEZZO = {
+  aereo: [{ transform: "none", opacity: 1 }, { transform: "translate(18px,-14px) rotate(-12deg)", opacity: 0, offset: .4 }, { transform: "translate(-16px,10px)", opacity: 0, offset: .41 }, { transform: "none", opacity: 1 }],
+  auto: [{ transform: "none", opacity: 1 }, { transform: "translateX(20px)", opacity: 0, offset: .4 }, { transform: "translateX(-18px)", opacity: 0, offset: .41 }, { transform: "none", opacity: 1 }],
+  nave: [{ transform: "none" }, { transform: "rotate(-14deg) translateY(-2px)" }, { transform: "rotate(10deg)" }, { transform: "rotate(-5deg)" }, { transform: "none" }],
+  piedi: [{ transform: "none" }, { transform: "translateY(-8px) rotate(-8deg)" }, { transform: "none" }, { transform: "translateY(-5px) rotate(6deg)" }, { transform: "none" }]
+};
+["treno", "bus", "camper", "moto", "bici"].forEach(m => VIAGGIO_MEZZO[m] = VIAGGIO_MEZZO.auto);
 function aggiornaTutto() {
   M.st = stati(); richiedi(); aggiornaTesta();
   if (tabAttiva === "paesi") { const y = $("#v-paesi").scrollTop; elencoPaesi(false); $("#v-paesi").scrollTop = y; }
@@ -855,7 +1189,7 @@ function collegaImp() {
     if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora: cancella paesi, città e foto"; tocco(); return; }
     try {
       await DB.sostituisci({ paesi: {}, citta: {} }, []);
-      dati = { paesi: {}, citta: {} }; FOTO.clear(); pctPrima = -1;
+      dati = { paesi: {}, citta: {}, visti: [], liv: 0 }; FOTO.clear(); pctPrima = -1;
       chiudiTutto(); toast("Tutto cancellato");
     } catch (er) { toast("Non riesco a cancellare"); }
   });
@@ -888,7 +1222,7 @@ async function esportaCopia() {
 }
 const CODICE = /^[A-Z]{2}$/;
 function pulisciDati(d) {
-  const out = { paesi: {}, citta: {} };
+  const out = { paesi: {}, citta: {}, visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(20, +d?.liv || 0)) };
   const data = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   const st = v => v === "v" || v === "l" || v === "w" ? v : null;
   const mz = v => Array.isArray(v) ? v.filter(m => MZ[m]) : [];
@@ -959,6 +1293,7 @@ async function aggiungiFoto(k, files, top) {
   }
   if (!n) { toast("Non riesco a leggere questa foto"); return; }
   toast(n === 1 ? "Foto aggiunta" : `${n} foto aggiunte`);
+  clearTimeout(tPremi); tPremi = setTimeout(controllaPremi, 600);
   if (pila[pila.length - 1] === top) {
     const y = $("#sheet").scrollTop;
     const box = $("#album"); const tmp = document.createElement("div"); tmp.innerHTML = htmlFoto(k);
@@ -1027,7 +1362,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { 
   try {
     await DB.open();
     const d = await DB.get("stato", "dati");
-    if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {} };
+    if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0 };
     (await DB.all("foto")).forEach(indicizzaFoto);
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) {
@@ -1045,8 +1380,10 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { 
   }
   preparaMappa();
   M.st = stati();
+  if (!pocoMoto()) { M.intro = performance.now() + 120; document.documentElement.classList.add("avvio"); setTimeout(() => document.documentElement.classList.remove("avvio"), 2600); }
   vistaIniziale();
   aggiornaTesta();
+  if (!Array.isArray(dati.visti)) controllaPremi();
 })();
 
 if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude|anthropic/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
