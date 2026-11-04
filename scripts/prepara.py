@@ -77,28 +77,19 @@ for c in wc:
 print("paesi nel conto:", len(UN))
 json.dump(sorted(paesi, key=lambda p: p["n"]), open(f"{OUT}/data/paesi.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
 
-# mappa: solo il codice del paese, senza Antartide
-t = json.load(open(f"{SRC}/countries-50m.json"))
+# mappe: solo il codice del paese (senza Antartide); la grande per la Mappa, la piccola per il globo di Numeri
 byn = {c["ccn3"]: c["cca2"] for c in wc if c.get("ccn3")}
 NOMI = {"Kosovo": "XK", "N. Cyprus": "CY", "Somaliland": "SO", "Siachen Glacier": "IN"}
-geo = []
-for g in t["objects"]["countries"]["geometries"]:
-    cc = byn.get(g.get("id")) or NOMI.get(g["properties"]["name"])
-    if not cc or cc == "AQ": continue
-    g.pop("id", None); g["properties"] = {"c": cc}
-    geo.append(g)
-t["objects"]["countries"]["geometries"] = geo
-t["objects"].pop("land", None)
-json.dump(t, open(f"{OUT}/data/mondo.json", "w"), separators=(",", ":"))
-
-# globo piccolo (Numeri): Natural Earth 1:110m, stessi codici
-t = json.load(open(f"{SRC}/countries-110m.json"))
-geo = []
-for g in t["objects"]["countries"]["geometries"]:
-    cc = byn.get(g.get("id")) or NOMI.get(g["properties"]["name"])
-    if not cc: continue
-    g.pop("id", None); g["properties"] = {"c": cc}
-    geo.append(g)
-t["objects"]["countries"]["geometries"] = geo
-t["objects"].pop("land", None)
-json.dump(t, open(f"{OUT}/data/globo.json", "w"), separators=(",", ":"))
+def mappa(sorgente, uscita):
+    t = json.load(open(f"{SRC}/{sorgente}"))
+    geo = []
+    for g in t["objects"]["countries"]["geometries"]:
+        cc = byn.get(g.get("id")) or NOMI.get(g["properties"]["name"])
+        if not cc or cc == "AQ": continue
+        g.pop("id", None); g["properties"] = {"c": cc}
+        geo.append(g)
+    t["objects"]["countries"]["geometries"] = geo
+    t["objects"].pop("land", None)
+    json.dump(t, open(f"{OUT}/data/{uscita}", "w"), separators=(",", ":"))
+mappa("countries-50m.json", "mondo.json")
+mappa("countries-110m.json", "globo.json")

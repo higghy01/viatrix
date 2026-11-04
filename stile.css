@@ -325,7 +325,8 @@ html.avvio .m-btn{animation:vx-appare .6s ease both 1s}
 @keyframes vx-su{from{opacity:0;transform:translate(-50%,40px)}to{opacity:1;transform:translateX(-50%)}}
 @keyframes vx-appare{from{opacity:0}to{opacity:1}}
 .m-ring .fg{stroke:url(#g-pct)}
-.m-top,.m-btn,.m-hint{transition:opacity .35s,transform .5s var(--ios)}
+.m-top,.m-hint{transition:opacity .35s,transform .5s var(--ios)}
+.m-btn{transition:opacity .35s,transform .45s var(--spring)}
 
 /* foglio a metà: sopra resta la mappa col paese */
 .sheet{--tinta:transparent;transition:transform .55s var(--ios),--tinta .6s ease;
@@ -350,7 +351,9 @@ html.meta .tabbar{transform:translate(-50%,140%);opacity:0}
 /* mini mappa che si disegna */
 .mini{box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--ink) 10%,transparent)}
 .mini .vic{animation:vx-appare .5s ease both}
-.mini .qui{stroke:var(--ink);stroke-opacity:.4;stroke-width:1.6;stroke-dasharray:1;stroke-dashoffset:0;animation:vx-traccia 1.1s cubic-bezier(.5,0,.3,1) both,vx-riempi .7s ease both .55s}
+.mini .qui{stroke:var(--ink);stroke-opacity:.4;stroke-width:1.6;animation:vx-riempi .7s ease both .55s}
+.mini .qui.solo{stroke:#fff;stroke-opacity:1;stroke-width:5;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25));transform-box:fill-box;transform-origin:center;animation:vx-pop .6s cubic-bezier(.34,1.56,.64,1) both .3s}
+.mini path.qui{stroke-dasharray:1;stroke-dashoffset:0;animation:vx-traccia 1.1s cubic-bezier(.5,0,.3,1) both,vx-riempi .7s ease both .55s}
 @keyframes vx-traccia{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 @keyframes vx-riempi{from{fill-opacity:0}to{fill-opacity:1}}
 .mini .cit{transform-box:fill-box;transform-origin:center;animation:vx-pop .55s cubic-bezier(.34,1.56,.64,1) both;animation-delay:calc(.75s + var(--i,0)*70ms)}
@@ -411,7 +414,7 @@ canvas.festa{position:fixed;inset:0;width:100%;height:100%;z-index:44;pointer-ev
 .timbro .tf{font-size:26px;line-height:1.1}
 .timbro b{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .timbro small{font-size:10.5px;font-weight:700;letter-spacing:.05em;opacity:.85;font-variant-numeric:tabular-nums}
-.timbro.stampa{animation:vx-timbro .55s cubic-bezier(.34,1.4,.64,1) both;animation-delay:calc(.2s + var(--i)*70ms)}
+.timbro.stampa{animation:vx-timbro .55s cubic-bezier(.34,1.4,.64,1) backwards;animation-delay:calc(.2s + var(--i)*70ms)}
 @keyframes vx-timbro{from{opacity:0;transform:rotate(calc(var(--r) + 14deg)) scale(1.7)}60%{opacity:1}to{opacity:1;transform:rotate(var(--r)) scale(1)}}
 
 .trofei{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}

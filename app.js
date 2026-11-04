@@ -82,6 +82,7 @@ const FOTO = new Map();            // chiave luogo → [{ id, t, mini, blob }]
 let tSalva = null;
 function salva(subito) {
   clearTimeout(tSalva);
+  if (!DB.db) return;   // finestra privata: l'avviso è già comparso all'avvio
   const fai = () => DB.put("stato", dati, "dati").catch(() => toast("Non riesco a salvare: lo spazio del telefono è pieno?"));
   if (subito) fai(); else tSalva = setTimeout(fai, 250);
 }
@@ -176,18 +177,20 @@ function misura() {
   for (const x of M.feats) (M.byC[x.c] = M.byC[x.c] || []).push(x);
   M.sfera = new Path2D(gp({ type: "Sphere" }));
   M.grat = new Path2D(gp(d3.geoGraticule10()));
-  M.zoom && M.zoom.extent([[0, 0], [W, H]]).translateExtent([[-W * .3, -H * .1], [W * 1.3, H * 1.1]]);
+  M.zoom && M.zoom.extent([[0, 0], [W, H]]).translateExtent(limiti(false));
   richiedi();
 }
 /* La parte principale di un paese (senza territori lontani): per inquadrarlo e per il nome */
+const PARTI = {};
 function parteMain(c) {
-  const fs = (MONDO || []).filter(f => f.properties.c === c);
-  if (!fs.length) return null;
+  if (c in PARTI) return PARTI[c];
+  const fs = (M.byC[c] || []).map(x => x.f);
+  if (!fs.length) return (PARTI[c] = null);
   const polys = [];
   fs.forEach(x => { const g = x.geometry; (g.type === "Polygon" ? [g.coordinates] : g.coordinates).forEach(co => polys.push({ type: "Polygon", coordinates: co })); });
   polys.forEach(q => { q.ar = d3.geoArea(q); q.ce = d3.geoCentroid(q); });
   const big = polys.reduce((a, q) => q.ar > a.ar ? q : a);
-  return { type: "GeometryCollection", geometries: polys.filter(q => q === big || (q.ar > big.ar * .004 && d3.geoDistance(q.ce, big.ce) < .22)), big };
+  return (PARTI[c] = { type: "GeometryCollection", geometries: polys.filter(q => q === big || (q.ar > big.ar * .004 && d3.geoDistance(q.ce, big.ce) < .22)), big });
 }
 function main(c) {
   if (M.main[c]) return M.main[c];
@@ -342,6 +345,14 @@ function tocca(e) {
   M.flash = { c: hit, t0: performance.now() }; richiedi();
   setTimeout(() => apriLivello({ tipo: "paese", c: hit, meta: true }), 90);
 }
+// limiti del trascinamento: più larghi quando si vola su un paese (Cile, Sudafrica… finirebbero sotto il foglio)
+const limiti = largo => largo ? [[-M.W, -M.H], [M.W * 2, M.H * 2]] : [[-M.W * .3, -M.H * .1], [M.W * 1.3, M.H * 1.1]];
+function rientra() {
+  if (!M.sel) return;
+  M.zoom.translateExtent(limiti(false));
+  const t = M.zoom.constrain()(M.t, [[0, 0], [M.W, M.H]], limiti(false));
+  if (t.x !== M.t.x || t.y !== M.t.y) M.sel.interrupt().transition().duration(pocoMoto() ? 0 : 500).ease(d3.easeCubicOut).call(M.zoom.transform, t);
+}
 // la parte di mappa che resta visibile sopra il foglio a metà
 const META = .4;
 function areaLibera(meta) {
@@ -355,6 +366,7 @@ function volaA(b, meta, kMax) {
   const bw = Math.max(1, b[1][0] - b[0][0]), bh = Math.max(1, b[1][1] - b[0][1]);
   const k = Math.max(1, Math.min(kMax || 30, Math.min((A.x1 - A.x0) / bw, (A.y1 - A.y0) / bh) * .82));
   const T = d3.zoomIdentity.translate((A.x0 + A.x1) / 2, (A.y0 + A.y1) / 2).scale(k).translate(-(b[0][0] + b[1][0]) / 2, -(b[0][1] + b[1][1]) / 2);
+  if (meta) M.zoom.translateExtent(limiti(true));
   M.sel.interrupt().transition().duration(pocoMoto() ? 0 : 900).ease(d3.easeCubicInOut).call(M.zoom.transform, T);
 }
 function volaAPaese(c, meta) { const m = main(c); if (m) volaA(m.b, meta); }
@@ -373,8 +385,9 @@ function vistaIniziale() {
   const st = M.st || {};
   let cs = Object.keys(st).filter(c => st[c] === "v" || st[c] === "l");
   if (!cs.length) cs = ["IT"];
+  // all'avvio basta la forma più grande di ogni paese (veloce anche con tanti paesi)
   let [x0, y0, x1, y1] = [1e9, 1e9, -1e9, -1e9];
-  cs.forEach(c => { const m = main(c); if (!m) return; x0 = Math.min(x0, m.b[0][0]); y0 = Math.min(y0, m.b[0][1]); x1 = Math.max(x1, m.b[1][0]); y1 = Math.max(y1, m.b[1][1]); });
+  cs.forEach(c => { const fs = M.byC[c]; if (!fs) return; const f = fs.reduce((a, x) => x.a > a.a ? x : a); x0 = Math.min(x0, f.b[0][0]); y0 = Math.min(y0, f.b[0][1]); x1 = Math.max(x1, f.b[1][0]); y1 = Math.max(y1, f.b[1][1]); });
   if (x0 > x1) return;
   const { W, H } = M, top = Math.min(150, H * .2), bot = Math.min(110, H * .14);
   const pad = 40, aw = W - 2 * pad, ah = H - top - bot - 2 * pad;
@@ -392,7 +405,7 @@ function aggiornaTesta() {
   if (pctPrima !== pct) {
     contaSu(n, pctPrima < 0 ? 0 : pctPrima * 100, pct * 100, v => pctTesto(v / 100));
     $("#m-ring").style.strokeDashoffset = 100 - Math.max(pct > 0 ? 2 : 0, pct * 100);
-    if (pctPrima >= 0 && !pocoMoto()) $("#m-pct").animate([{ transform: "scale(1)" }, { transform: "scale(1.12)" }, { transform: "scale(1)" }], { duration: 600, easing: "cubic-bezier(.34,1.56,.64,1)", delay: 250 });
+    if (pctPrima >= 0 && !pocoMoto() && $("#m-pct").animate) $("#m-pct").animate([{ transform: "scale(1)" }, { transform: "scale(1.12)" }, { transform: "scale(1)" }], { duration: 600, easing: "cubic-bezier(.34,1.56,.64,1)", delay: 250 });
     pctPrima = pct;
   }
   const lv = livello(k.onu.length);
@@ -532,7 +545,7 @@ function statistiche() {
     return { c, f, n: onu.length };
   });
   const mz = new Map();
-  [...Object.values(dati.paesi), ...Object.values(dati.citta)].filter(x => x.s !== "w").forEach(x => (x.mezzi || []).forEach(m => MZ[m] && mz.set(m, (mz.get(m) || 0) + 1)));
+  [...Object.values(dati.paesi), ...Object.values(dati.citta)].filter(x => x.s === "v" || x.s === "l").forEach(x => (x.mezzi || []).forEach(m => MZ[m] && mz.set(m, (mz.get(m) || 0) + 1)));
   return { ...k, n: k.onu.length, nCitta: citta.length, nFoto, gg, per, cont, nCont: cont.filter(x => x.f).length,
     contSet: new Set(cont.filter(x => x.f).map(x => x.c)), mz, anno: per.length ? new Date(per[0][0] * 864e5).getUTCFullYear() : null };
 }
@@ -552,14 +565,14 @@ function controllaPremi() {
   nuovi.forEach(id => { const t = TROFEI.find(x => x[0] === id); festeggia({ e: t[1], k: "Traguardo", t: t[2], d: t[3] }); });
 }
 
-let globo = null;
-async function disegnaNumeri(entrata) {
+let globoAttivo = null;
+function disegnaNumeri(entrata) {
   const S = statistiche(), v = $("#v-numeri");
   const lv = livello(S.n);
   const mzL = [...S.mz.entries()].sort((a, b) => b[1] - a[1]);
   const mzMax = mzL.length ? mzL[0][1] : 1;
   const ultimi = [...Object.entries(dati.paesi).map(([c, d]) => ({ tipo: "paese", c, d, n: P[c]?.n })), ...Object.values(dati.citta).map(d => ({ tipo: "citta", c: d.c, d, n: d.n }))]
-    .filter(x => x.d.dal && x.n && x.d.s !== "w").sort((a, b) => (b.d.dal || "").localeCompare(a.d.dal || "")).slice(0, 8);
+    .filter(x => x.d.dal && x.n && (x.d.s === "v" || x.d.s === "l")).sort((a, b) => (b.d.dal || "").localeCompare(a.d.dal || "")).slice(0, 8);
   const ok = new Set(TROFEI.filter(t => t[4](S)).map(t => t[0]));
   // timbri del passaporto: ogni paese visitato, con l'anno del primo viaggio
   const annoDi = c => { const ds = [dati.paesi[c]?.dal, ...cittaDi(c).map(x => x.dal)].filter(Boolean).sort(); return ds[0] ? ds[0].slice(0, 4) : ""; };
@@ -572,11 +585,11 @@ async function disegnaNumeri(entrata) {
       <button class="round-btn" id="b-imp" aria-label="Impostazioni">${ICO.ingr}</button></header>
     <section class="hero${ent}">
       <div class="ring-wrap"><svg class="big-ring" viewBox="0 0 120 120" aria-hidden="true">
-        <defs><linearGradient id="g-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--w)"/><stop offset="1" stop-color="var(--v)"/></linearGradient></defs>
+        <defs><linearGradient id="g-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--w)"/><stop offset="1" style="stop-color:var(--v)"/></linearGradient></defs>
         <circle class="bg" cx="60" cy="60" r="54"/><circle class="fg" id="n-ring" cx="60" cy="60" r="54" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
         <canvas id="globo" aria-label="Il mondo con i paesi visitati: trascina per girarlo"></canvas></div>
       <div class="hero-t"><b class="pct" id="n-pct">0%</b><h2>del mondo visitato</h2>
-        <p>${S.n} paesi su ${S.tot}${S.nCont ? ` · ${S.nCont === 1 ? "1 continente" : S.nCont + " continenti"}` : ""}</p>
+        <p>${S.n === 1 ? "1 paese" : S.n + " paesi"} su ${S.tot}${S.nCont ? ` · ${S.nCont === 1 ? "1 continente" : S.nCont + " continenti"}` : ""}</p>
         <p class="terra">${pctTesto(S.area)} della terra emersa</p></div>
     </section>
     <section class="liv${ent}" style="--i:1">
@@ -622,7 +635,7 @@ const EMOJI_CONT = { eu: "🏰", as: "🏯", af: "🦁", na: "🗽", sa: "🦜",
 const tile = (e, n, t, i, entrata) => `<div class="tile${entrata ? " entra" : ""}" style="--i:${i}"><span class="e">${e}</span><b data-n="${n}">${n.toLocaleString("it-IT")}</b><span>${t}</span></div>`;
 
 /* Il globo che gira (Numeri): Natural Earth 1:110m, si trascina col dito */
-let GLOBO = null;
+let GLOBO = null;   // forme del globo (1:110m)
 async function avviaGlobo(st) {
   const cv = $("#globo"); if (!cv) return;
   if (!GLOBO) { try { const t = await (await fetch("data/globo.json")).json(); GLOBO = topojson.feature(t, t.objects.countries).features; } catch (e) { return; } }
@@ -635,7 +648,7 @@ async function avviaGlobo(st) {
   // si parte con i paesi visitati davanti
   const vis = GLOBO.filter(f => st[f.properties.c] === "v" || st[f.properties.c] === "l");
   const ce = vis.length ? d3.geoCentroid({ type: "FeatureCollection", features: vis }) : [12, 42];
-  const g = globo = { cv, rot: [-ce[0] + 25, -Math.max(-35, Math.min(35, ce[1])) * .7], vel: pocoMoto() ? 0 : .012, drag: null, raf: 0, last: 0 };
+  const g = globoAttivo = { cv, rot: [-ce[0] + 25, -Math.max(-35, Math.min(35, ce[1])) * .7], vel: pocoMoto() ? 0 : .012, drag: null, raf: 0, last: 0 };
   const grat = d3.geoGraticule10();
   const disegnaG = () => {
     proj.rotate(g.rot);
@@ -651,7 +664,7 @@ async function avviaGlobo(st) {
   };
   const giro = now => {
     g.raf = 0;
-    if (globo !== g || !cv.isConnected || tabAttiva !== "numeri" || document.hidden) { disegnaG(); return; }
+    if (globoAttivo !== g || !cv.isConnected || tabAttiva !== "numeri" || document.hidden || pila.length) { disegnaG(); return; }
     const dt = Math.min(50, now - (g.last || now)); g.last = now;
     if (!g.drag) g.rot[0] += g.vel * dt;
     disegnaG();
@@ -670,7 +683,8 @@ function coriandoli(x, y, o = {}) {
   if (pocoMoto()) return;
   if (!FX.cv) { FX.cv = document.createElement("canvas"); FX.cv.className = "festa"; FX.cv.setAttribute("aria-hidden", "true"); document.body.appendChild(FX.cv); FX.ctx = FX.cv.getContext("2d"); }
   const dpr = Math.min(2, devicePixelRatio || 1);
-  if (FX.cv.width !== innerWidth * dpr || FX.cv.height !== innerHeight * dpr) { FX.cv.width = innerWidth * dpr; FX.cv.height = innerHeight * dpr; }
+  const cw = Math.round(innerWidth * dpr), ch = Math.round(innerHeight * dpr);
+  if (FX.cv.width !== cw || FX.cv.height !== ch) { FX.cv.width = cw; FX.cv.height = ch; }
   FX.dpr = dpr;
   const cols = o.colori || [COL.v, COL.l, COL.w, "#5B8CFF", "#FF7AB6", "#FFFFFF"];
   const n = o.n || 80, now = performance.now();
@@ -729,11 +743,11 @@ function prossimoPremio() {
   el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
   tocco();
   if (p.grande) coriandoli(0, 0, { pioggia: true, n: 140 });
-  else { const r = el.getBoundingClientRect(); coriandoli(r.left + 34, r.top + r.height / 2, { n: 40, forza: 7, apertura: 3 }); }
+  else setTimeout(() => { const r = el.getBoundingClientRect(); if (el.classList.contains("on")) coriandoli(r.left + 40, r.top + r.height / 2, { n: 40, forza: 7, apertura: 3 }); }, 380);
   clearTimeout(el._t); el._t = setTimeout(chiudiPremio, p.grande ? 3000 : 2200);
 }
 function chiudiPremio() {
-  const el = $("#premio"); if (!el) return;
+  const el = $("#premio"); if (!el || !el.classList.contains("on")) return;
   clearTimeout(el._t); el.classList.remove("on");
   setTimeout(prossimoPremio, 420);
 }
@@ -764,6 +778,7 @@ window.addEventListener("popstate", () => {
 });
 const COLORI_BARRA = $$('meta[name="theme-color"]').map(m => [m, m.content]);
 function sfondo(on) {
+  if (document.documentElement.classList.contains("aperto") === on) return;
   document.documentElement.classList.toggle("aperto", on);
   COLORI_BARRA.forEach(([m]) => { if (on) { m.dataset.c = m.content; m.content = "#000000"; } else if (m.dataset.c) m.content = m.dataset.c; });
 }
@@ -822,6 +837,7 @@ function chiudiFoglio() {
   pila.length = 0;
   document.documentElement.classList.remove("meta");
   M.scelto = null; M.pin = null; richiedi();
+  rientra();
   $("#sheet").classList.remove("on");
   $("#scrim").classList.remove("on");
   sfondo(false);
@@ -896,11 +912,13 @@ function miniMappa(c, selId) {
   const W = 640, H = 400;
   const fs = M.byC[c] || [];
   // si inquadra la parte principale del paese (niente territori lontani: Guyana francese, Hawaii…)
-  const obiettivo = fs.length ? parteMain(c) : d3.geoCircle().center([p.ll[1], p.ll[0]]).radius(1.2)();
+  // paesi senza forma (isolette, Antartide): un cerchio grande quanto il paese, visto dall'alto (va bene anche ai poli)
+  const obiettivo = fs.length ? parteMain(c) : d3.geoCircle().center([p.ll[1], p.ll[0]]).radius(Math.max(1.2, Math.sqrt(p.a || 0) / 222))();
   const ce = d3.geoCentroid(obiettivo);
-  const proj = d3.geoMercator().rotate([-ce[0], 0]).fitExtent([[36, 36], [W - 36, H - 36]], obiettivo);
+  const proj = fs.length ? d3.geoMercator().rotate([-ce[0], 0]).fitExtent([[36, 36], [W - 36, H - 36]], obiettivo)
+    : d3.geoAzimuthalEqualArea().rotate([-p.ll[1], -p.ll[0]]).fitExtent([[36, 36], [W - 36, H - 36]], obiettivo);
   // se il paese è piccolissimo, un po' di contorno
-  if (proj.scale() > 9000) proj.scale(9000).translate([W / 2, H / 2]).center([0, ce[1]]).rotate([-ce[0], 0]);
+  if (fs.length && proj.scale() > 9000) proj.scale(9000).translate([W / 2, H / 2]).center([0, ce[1]]).rotate([-ce[0], 0]);
   const gp = d3.geoPath(proj);
   const s = statoPaese(c);
   const nb = new Set(p.b || []);
@@ -912,7 +930,7 @@ function miniMappa(c, selId) {
   const etichette = pts.length <= 8 || selId;
   return `<div class="mini"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
     ${altri.map(f => `<path class="vic" d="${gp(f.f)}"/>`).join("")}
-    ${fs.length ? fs.map(f => `<path class="qui${s ? " s-" + s : ""}" pathLength="1" d="${gp(f.f)}"/>`).join("") : `<circle class="qui${s ? " s-" + s : ""}" cx="${proj([p.ll[1], p.ll[0]])[0]}" cy="${proj([p.ll[1], p.ll[0]])[1]}" r="14"/>`}
+    ${fs.length ? fs.map(f => `<path class="qui${s ? " s-" + s : ""}" pathLength="1" d="${gp(f.f)}"/>`).join("") : (([x, y]) => `<circle class="qui solo${s ? " s-" + s : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20"/><text class="lbl" x="${x.toFixed(1)}" y="${(y + 52).toFixed(1)}" text-anchor="middle">${esc(p.n)}</text>`)(proj([p.ll[1], p.ll[0]]))}
     ${pts.map((o, i) => `<circle style="--i:${Math.min(i, 10)}" class="cit s-${o.x.s || "w"}${o.x.id === selId ? " sel" : ""}" cx="${o.xy[0].toFixed(1)}" cy="${o.xy[1].toFixed(1)}" r="${o.x.id === selId ? 10 : 7}"/>`).join("")}
     ${etichette ? pts.filter(o => !selId || o.x.id === selId || pts.length <= 8).map(o => `<text class="lbl" x="${(o.xy[0] + 16).toFixed(1)}" y="${(o.xy[1] + 7).toFixed(1)}" ${o.xy[0] > W - 180 ? `text-anchor="end" dx="-32"` : ""}>${esc(o.x.n)}</text>`).join("") : ""}
   </svg></div>`;
@@ -1001,11 +1019,13 @@ function scegliCitta(c, x) {
   const id = x ? "g" + x[0] : "u" + nuovoId();
   if (!dati.citta[id]) {
     const d = CITTA.get(c);
-    const sp = statoPaese(c), prima = sp;
+    const sp = statoPaese(c), prima = sp, primaPct = conti().pct;
     dati.citta[id] = x ? { id, c, n: x[1], r: d?.r[x[5]] || "", ll: [x[2], x[3]], s: sp === "w" ? "w" : "v", mezzi: [], t: Date.now() }
       : { id, c, n: String($("#qc").value).trim().slice(0, 60), r: "", ll: null, s: sp === "w" ? "w" : "v", mezzi: [], t: Date.now() };
     salva(true);
+    // anche aggiungendo una città il paese diventa visitato: stessa festa del pulsante
     dopoCambio(c, prima);
+    if (statoPaese(c) === "v" && prima !== "v" && prima !== "l") { const k = conti(); festeggia({ paese: true, e: bandiera(c), k: "Nuovo paese", t: P[c].n, d: k.pct > primaPct ? `Ora sei al ${pctTesto(k.pct)} del mondo` : "È sulla tua mappa" }); }
   }
   tocco();
   sostituisciLivello({ tipo: "citta", id, meta: !!pila[pila.length - 2]?.meta });
@@ -1222,7 +1242,7 @@ async function esportaCopia() {
 }
 const CODICE = /^[A-Z]{2}$/;
 function pulisciDati(d) {
-  const out = { paesi: {}, citta: {}, visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(20, +d?.liv || 0)) };
+  const out = { paesi: {}, citta: {}, visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(LIVELLI.length - 1, Math.floor(+d?.liv) || 0)) };
   const data = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   const st = v => v === "v" || v === "l" || v === "w" ? v : null;
   const mz = v => Array.isArray(v) ? v.filter(m => MZ[m]) : [];
@@ -1279,6 +1299,7 @@ function quadrata(im, lato) {
 }
 async function miniDa(blob) { const { im, u } = await caricaImg(blob); const m = quadrata(im, 300); URL.revokeObjectURL(u); return m; }
 async function aggiungiFoto(k, files, top) {
+  if (!DB.db) { toast("In una finestra privata le foto non si possono salvare"); return; }
   toast(files.length === 1 ? "Aggiungo la foto…" : `Aggiungo ${files.length} foto…`);
   let n = 0;
   for (const file of files.slice(0, 30)) {
@@ -1355,6 +1376,7 @@ document.addEventListener("focusin", e => {
   setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), 320);
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { leggiColori(); richiedi(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); });
 
 (async () => {
   leggiColori();
