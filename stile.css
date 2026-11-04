@@ -457,3 +457,5 @@ html.aperto .home-av,html.meta .home-av{opacity:0;pointer-events:none}
 .adm-form{margin-top:14px}
 .adm-form .campo input{font-size:16px}
 #adm-err{color:var(--v);min-height:1.2em}
+/* il cartoncino "Home" solo sulla Mappa: nelle altre schede coprirebbe le liste */
+html[data-tab="paesi"] .home-av,html[data-tab="numeri"] .home-av{opacity:0;visibility:hidden;pointer-events:none}
