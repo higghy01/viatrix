@@ -30,6 +30,8 @@ const ICO = {
   piu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
   cerca: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`,
   foto: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
+  condividi: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2"/></svg>`,
+  aggHome: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`,
   ingr: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>`
 };
 
@@ -1038,13 +1040,14 @@ function htmlImp() {
     <h2 style="font-size:28px;margin-top:4px">Impostazioni</h2>
     <div class="blk-h">Aspetto</div>
     <div class="opz" id="tema">${[["auto", "Automatico"], ["light", "Chiaro"], ["dark", "Scuro"]].map(([k, t]) => `<button data-tema="${k}" aria-pressed="${tema === k}">${t}</button>`).join("")}</div>
+    ${installata() ? "" : `<button class="btn ghost" id="b-home" style="margin-top:16px">${ICO.aggHome} Come metterla sulla schermata Home</button>`}
     <div class="blk-h">I tuoi dati</div>
     <p class="piccolo" style="margin-top:0">Paesi, città e foto restano <b>solo su questo telefono</b>. Ogni tanto salva una copia (per esempio su iCloud Drive): serve se cambi telefono.</p>
     <button class="btn pieno" id="b-salva">Salva una copia</button>
     <label class="btn ghost" style="cursor:pointer">Ripristina da una copia<input type="file" accept="application/json,.json" id="b-file" hidden></label>
     <div id="b-conf"></div>
     <button class="btn rosso" id="b-canc" style="margin-top:28px">Cancella tutto</button>
-    <p class="about">Viatrix · versione 1<br>Mappa: Natural Earth · Città: GeoNames</p>
+    <p class="about">Viatrix · versione 2.2<br>Mappa: Natural Earth · Città: GeoNames</p>
   </div>`;
 }
 
@@ -1203,6 +1206,7 @@ function collegaImp() {
     applicaTema(b.dataset.tema);
   });
   $("#b-salva").addEventListener("click", esportaCopia);
+  $("#b-home")?.addEventListener("click", () => { chiudiTutto(); setTimeout(() => avvisoHome(true), 500); });
   $("#b-file").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) chiediRipristino(f); });
   $("#b-canc").addEventListener("click", async e => {
     const b = e.currentTarget;
@@ -1351,6 +1355,38 @@ function apriFoto(k, id, top) {
   };
 }
 
+/* ---------- Avviso: mettila sulla schermata Home ----------
+   Aperta da Safari (non dalla Home) l'iPhone può cancellare i dati di un sito che non si apre per qualche settimana:
+   per questo, finché non è sulla Home, compare un cartoncino con i passi. "Più tardi" lo rimanda di 3 giorni. */
+const installata = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const suIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const suTelefono = () => suIOS() || /Android/.test(navigator.userAgent);
+function avvisoHome(forza) {
+  if (installata() || (!forza && !suTelefono())) return;
+  if (!forza) { try { if (Date.now() < (+localStorage.getItem("viatrix-home-dopo") || 0)) return; } catch (e) {} }
+  const el = $("#home-av");
+  const passi = suIOS()
+    ? [[ICO.condividi, "Tocca <b>Condividi</b>", "il quadrato con la freccia nella barra di Safari (se non lo vedi, prima i tre puntini «…»)"],
+       [ICO.aggHome, "Scegli <b>Aggiungi alla schermata Home</b>", "se non c'è, scorri un po' l'elenco"],
+       [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]]
+    : [["⋮", "Apri il <b>menu</b> del browser", "i tre puntini in alto"],
+       [ICO.aggHome, "Scegli <b>Installa app</b> o <b>Aggiungi a schermata Home</b>", ""],
+       [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]];
+  el.innerHTML = `<button class="x" data-x aria-label="Chiudi">${ICO.x}</button>
+    <div class="ha-t"><b>Mettila sulla schermata Home</b><span>Così si apre come un'app e i tuoi viaggi restano al sicuro: aperta solo da ${suIOS() ? "Safari" : "browser"}, il telefono potrebbe cancellarli dopo qualche settimana.</span></div>
+    <ol class="ha-passi">${passi.map((p, i) => `<li style="--i:${i}"><span class="ha-ic">${p[0]}</span><div>${p[1]}${p[2] ? `<small>${p[2]}</small>` : ""}</div></li>`).join("")}</ol>
+    <button class="ha-dopo" data-dopo>Più tardi</button>`;
+  const chiudi = () => {
+    tocco();
+    try { localStorage.setItem("viatrix-home-dopo", String(Date.now() + 3 * 864e5)); } catch (e) {}
+    el.classList.remove("on"); document.documentElement.classList.remove("avviso-home");
+  };
+  el.querySelector("[data-x]").onclick = chiudi;
+  el.querySelector("[data-dopo]").onclick = chiudi;
+  document.documentElement.classList.add("avviso-home");
+  requestAnimationFrame(() => el.classList.add("on"));
+}
+
 /* ---------- Tocco e avvisi ---------- */
 function tocco() { try { navigator.vibrate && navigator.vibrate(8); } catch (e) {} }
 let tt;
@@ -1406,6 +1442,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) glob
   vistaIniziale();
   aggiornaTesta();
   if (!Array.isArray(dati.visti)) controllaPremi();
+  setTimeout(() => { if (!pila.length) avvisoHome(); }, 2400);
 })();
 
 if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude|anthropic/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
