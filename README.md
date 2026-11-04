@@ -2,10 +2,10 @@
 
 *Viatrix* in latino vuol dire **"la viaggiatrice"**.
 
-Un'app per segnare sulla mappa del mondo i posti in cui sei stata:
+Un'app per segnare sulla mappa del mondo i posti che hai visitato:
 
 - **Mappa**: i paesi si colorano — visitato (corallo), ci vivo (verde mare), vorrei andarci (ambra). Si ingrandisce con due dita.
-- **Paese**: tocchi un paese e scegli se ci sei stata, ci vivi o vorresti andarci; poi le date (dal giorno al giorno), il mezzo di trasporto, le città, le foto e una nota.
+- **Paese**: tocchi un paese e scegli se l'hai visitato, ci vivi o vorresti andarci; poi le date (dal giorno al giorno), il mezzo di trasporto, le città, le foto e una nota.
 - **Città**: per ogni paese si possono aggiungere tutte le città (elenco già pronto, anche i paesi piccoli in Italia), ognuna con le sue date, mezzi e foto.
 - **Paesi**: tutti i paesi divisi per continente, con la ricerca e quanti ne hai visti.
 - **Numeri**: la percentuale del mondo visitato (su 195 paesi), i continenti, i giorni in viaggio, i mezzi più usati e gli ultimi viaggi.

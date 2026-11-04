@@ -1,7 +1,7 @@
 {
   "name": "Viatrix",
   "short_name": "Viatrix",
-  "description": "I posti in cui sei stata, sulla mappa del mondo: paesi, città, viaggi e foto.",
+  "description": "I posti che hai visitato, sulla mappa del mondo: paesi, città, viaggi e foto.",
   "lang": "it",
   "start_url": "./",
   "scope": "./",

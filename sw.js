@@ -1,7 +1,7 @@
 /* Copia dell'app sul telefono: si apre anche senza rete.
    A ogni modifica dei file alzare VERSIONE, altrimenti il telefono resta sulla vecchia. */
-const VERSIONE = "viatrix-v7";
-const FILE = ["./", "index.html", "stile.css?v=7", "app.js?v=7", "config.js?v=7", "lib/d3.min.js", "lib/topojson-client.min.js",
+const VERSIONE = "viatrix-v8";
+const FILE = ["./", "index.html", "stile.css?v=8", "app.js?v=8", "config.js?v=8", "lib/d3.min.js", "lib/topojson-client.min.js",
   "data/paesi.json", "data/mondo.json", "data/globo.json", "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSIONE).then(c => c.addAll(FILE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {

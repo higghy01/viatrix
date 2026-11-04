@@ -506,8 +506,9 @@ function rigaPaese(p, s, nc) {
 }
 
 /* ---------- Numeri ---------- */
-const LIVELLI = [[0, "🧳", "Pronta a partire"], [1, "📍", "Prima tappa"], [3, "📸", "Turista"], [6, "🎒", "Viaggiatrice"], [10, "🧭", "Esploratrice"],
-  [20, "🌍", "Giramondo"], [35, "✈️", "Globetrotter"], [50, "⛵", "Navigatrice"], [80, "🏆", "Leggenda"], [120, "🌐", "Cittadina del mondo"]];
+// nomi uguali per tutti (né al maschile né al femminile)
+const LIVELLI = [[0, "🧳", "Valigia pronta"], [1, "📍", "Prima tappa"], [3, "📸", "Turista"], [6, "🎒", "Zaino in spalla"], [10, "🧭", "Nuovi orizzonti"],
+  [20, "🌍", "Giramondo"], [35, "✈️", "Globetrotter"], [50, "⛵", "Vele spiegate"], [80, "🏆", "Leggenda"], [120, "🌐", "Senza confini"]];
 function livello(n) {
   let i = 0; while (i + 1 < LIVELLI.length && n >= LIVELLI[i + 1][0]) i++;
   const [min, e, t] = LIVELLI[i], nx = LIVELLI[i + 1];
@@ -529,7 +530,7 @@ const TROFEI = [
   ["citta50", "🏰", "Cinquanta città", "50 città visitate", S => S.nCitta >= 50],
   ["foto", "📷", "Primo ricordo", "Aggiungi una foto", S => S.nFoto >= 1],
   ["foto25", "🖼️", "Album pieno", "25 foto", S => S.nFoto >= 25],
-  ["sogni", "✨", "Sognatrice", "5 paesi in Vorrei andarci", S => S.w >= 5],
+  ["sogni", "✨", "Sogni nel cassetto", "5 paesi in Vorrei andarci", S => S.w >= 5],
   ["settimana", "🗓️", "Una settimana via", "7 giorni in viaggio", S => S.gg >= 7],
   ["mese", "🌙", "Un mese in giro", "30 giorni in viaggio", S => S.gg >= 30],
   ["volo", "✈️", "In volo", "Un viaggio in aereo", S => S.mz.has("aereo")],
@@ -601,7 +602,7 @@ function disegnaNumeri(entrata) {
       <span class="liv-e">${lv.e}</span>
       <div class="liv-t"><small>Livello ${lv.i + 1}</small><b>${lv.t}</b>
         <div class="barra oro"><i style="--f:0" data-f="${prog}"></i></div>
-        <span>${lv.next ? `Ancora ${lv.next.n - S.n === 1 ? "1 paese" : lv.next.n - S.n + " paesi"} per diventare ${lv.next.t} ${lv.next.e}` : "Hai raggiunto il livello più alto"}</span></div>
+        <span>${lv.next ? `Ancora ${lv.next.n - S.n === 1 ? "1 paese" : lv.next.n - S.n + " paesi"} per il livello «${lv.next.t}» ${lv.next.e}` : "Hai raggiunto il livello più alto"}</span></div>
     </section>
     <div class="tiles">
       ${tile("🏙️", S.nCitta, "città", 2, entrata)}
@@ -625,7 +626,7 @@ function disegnaNumeri(entrata) {
       return `<button class="vg" ${x.tipo === "paese" ? `data-paese="${x.c}"` : `data-citta="${esc(x.d.id)}"`}><span class="ic">${f ? `<img src="${esc(f.mini)}" alt="">` : bandiera(x.c)}</span>
         <span class="nm"><b>${esc(x.n)}</b><small>${esc(fmtPeriodo(x.d.dal, x.d.al))}</small></span><span class="mzs">${(x.d.mezzi || []).map(m => MZ[m]?.[1] || "").join("")}</span></button>`;
     }).join("")}</div>` : ""}
-    ${!S.vis.length ? `<div class="vuoto"><b>Ancora niente</b>Segna sulla mappa i paesi in cui sei stata: qui compariranno i tuoi numeri, i timbri e i traguardi.</div>` : ""}
+    ${!S.vis.length ? `<div class="vuoto"><b>Ancora niente</b>Segna sulla mappa i paesi che hai visitato: qui compariranno i tuoi numeri, i timbri e i traguardi.</div>` : ""}
     <p class="about">Viatrix · città, foto e ricordi restano su questo telefono</p>`;
   $("#b-imp").onclick = () => { tocco(); apriLivello({ tipo: "imp" }); };
   requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -900,7 +901,7 @@ function htmlViaggio(d) {
       <div class="campo"><label for="f-dal">${vivo ? "Dal" : "Dal giorno"}</label><input type="date" id="f-dal" value="${esc(d.dal || "")}"></div>
       <div class="campo"><label for="f-al">${vivo ? "Fino al" : "Al giorno"}</label><input type="date" id="f-al" value="${esc(d.al || "")}" ${d.dal ? `min="${esc(d.dal)}"` : ""}></div>
     </div>${n && !vivo ? `<div class="durata"><span>${nGiorni(n)}</span>${d.dal || d.al ? `<button data-nodate>Togli le date</button>` : ""}</div>` : ""}</div>
-    <div class="blk-h">${vivo ? "Come ti sposti" : "Come ci sei andata"}</div>
+    <div class="blk-h">${vivo ? "Come ti sposti" : "Come hai viaggiato"}</div>
     <div class="mezzi">${MEZZI.map(([k, e, t]) => `<button class="chip-m" data-mezzo="${k}" aria-pressed="${(d.mezzi || []).includes(k)}"><span class="e">${e}</span>${t}</button>`).join("")}</div>`;
 }
 function htmlFoto(k) {
@@ -1375,7 +1376,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.4";
+const VERSIONE_APP = "2.5";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
@@ -1499,7 +1500,7 @@ function collegaStat() {
     });
     return;
   }
-  $("#adm-esci").addEventListener("click", () => { tocco(); scriviLS("viatrix-admin", null); tokenAdmin = null; indietro(); toast("Sei uscito dalle statistiche"); });
+  $("#adm-esci").addEventListener("click", () => { tocco(); scriviLS("viatrix-admin", null); tokenAdmin = null; indietro(); toast("Statistiche chiuse"); });
   caricaStat();
 }
 async function caricaStat() {
