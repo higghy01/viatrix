@@ -1,6 +1,6 @@
 rules_version = '2';
 // Viatrix: ogni telefono scrive solo il suo riepilogo anonimo (nome casuale lungo).
-// Niente nomi, città, date, foto o note. Legge solo Sasha (il suo ID utente al posto di UID_DI_SASHA).
+// Niente nomi, città, date, foto o note. Legge solo il proprietario (il suo ID utente qui sotto).
 service cloud.firestore {
   match /databases/{db}/documents {
     match /dispositivi/{id} {
@@ -24,7 +24,7 @@ service cloud.firestore {
           && d.mezzi is map && d.mezzi.size() <= 12;
       }
       allow create, update: if valido();
-      allow read: if request.auth != null && request.auth.uid == 'UID_DI_SASHA';
+      allow read: if request.auth != null && request.auth.uid == 'XWWfnbGa1YOWGtkcrtVcrc51teC3';
       allow delete: if false;
     }
   }

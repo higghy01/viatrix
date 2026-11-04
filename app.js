@@ -1437,7 +1437,7 @@ async function leggiDispositivi() {
     if (r.status === 403) throw new Error("permesso");
     if (!r.ok) throw new Error("rete");
     const d = await r.json();
-    (d.documents || []).forEach(x => out.push({ id: x.name.split("/").pop(), ...Object.fromEntries(Object.entries(x.fields || {}).map(([k, v]) => [k, daFS(v)])) }));
+    (d.documents || []).filter(x => !x.name.split("/").pop().startsWith("zzprova")).forEach(x => out.push({ id: x.name.split("/").pop(), ...Object.fromEntries(Object.entries(x.fields || {}).map(([k, v]) => [k, daFS(v)])) }));
     if (!d.nextPageToken) break; pt = d.nextPageToken;
   }
   return out;
