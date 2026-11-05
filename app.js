@@ -1071,14 +1071,19 @@ const kmTra = (a, b, c, d) => { const r = Math.PI / 180, x = Math.sin((c - a) * 
 // i posti da mostrare: per un paese i 12 più famosi, per una città gli 8 più famosi entro 15 km.
 // Elenco vario: al massimo 3 dello stesso tipo, 2 torri o grattacieli, 3 tra montagne e acque (la Cina non sono solo vette, Dubai non solo grattacieli)
 function vari(righe, quanti) {
-  const out = [], per = {};
+  // montagne e acque distribuite: al massimo una ogni 4 posti (le altre aspettano il loro turno)
+  const out = [], per = {}, attesa = [];
+  const nat = t => t === "montagna" || t === "acqua";
+  const puo = r => (per[r[9]] || 0) >= (r[9] === "torre" ? 2 : 3) ? false : nat(r[9]) && (per.natura || 0) >= Math.min(3, Math.floor(out.length / 4) + 1) ? "dopo" : true;
+  const metti = r => { per[r[9]] = (per[r[9]] || 0) + 1; if (nat(r[9])) per.natura = (per.natura || 0) + 1; out.push(r); };
+  const recupera = () => { for (let i = 0; i < attesa.length && out.length < quanti; i++) if (puo(attesa[i]) === true) { metti(attesa.splice(i, 1)[0]); i = -1; } };
   for (const r of righe) {
+    recupera();
     if (out.length >= quanti) break;
-    const t = r[9], nat = t === "montagna" || t === "acqua";
-    if ((per[t] || 0) >= (t === "torre" ? 2 : 3) || (nat && (per.natura || 0) >= 3)) continue;
-    per[t] = (per[t] || 0) + 1; if (nat) per.natura = (per.natura || 0) + 1;
-    out.push(r);
+    const p = puo(r);
+    if (p === true) metti(r); else if (p === "dopo") attesa.push(r);
   }
+  recupera();
   return out;
 }
 function sceltaConsigli(righe, top) {
