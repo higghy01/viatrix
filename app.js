@@ -178,6 +178,26 @@ const M = { feats: [], byC: {}, W: 0, H: 0, dpr: 1, t: d3.zoomIdentity, raf: 0, 
 let MONDO = null;
 const NOMI_CORTI = { US: "Stati Uniti", GB: "Regno Unito", CD: "RD Congo", CF: "Centrafrica", DO: "Rep. Dominicana", BA: "Bosnia", AE: "Emirati Arabi", SA: "Arabia Saudita", PG: "Papua N. Guinea", KP: "Corea del Nord", KR: "Corea del Sud", MK: "Macedonia del Nord", TT: "Trinidad e Tobago", GQ: "Guinea Equat." };
 const nomeCorto = c => NOMI_CORTI[c] || P[c]?.n || c;
+/* Nella mappa di partenza alcuni territori d'oltremare sono dentro la forma del loro paese (la Guyana francese e la Riunione
+   dentro la Francia, le Svalbard dentro la Norvegia): toccandoli si apriva il paese sbagliato. Qui diventano forme a sé:
+   ogni isola va al territorio più vicino della lista (entro 500 km dal suo punto in paesi.json). */
+const OLTREMARE = { FR: ["GF", "GP", "MQ", "RE", "YT"], NO: ["SJ"] };
+function separaOltremare(fs) {
+  const nuove = [];
+  for (const f of fs) {
+    const ter = (OLTREMARE[f.properties.c] || []).filter(c => P[c]); if (!ter.length) continue;
+    const g = f.geometry, polys = g.type === "Polygon" ? [g.coordinates] : g.coordinates, resta = [], per = {};
+    for (const p of polys) {
+      const ce = d3.geoCentroid({ type: "Polygon", coordinates: p });
+      const vic = ter.map(c => [c, d3.geoDistance(ce, [P[c].ll[1], P[c].ll[0]])]).sort((a, b) => a[1] - b[1])[0];
+      if (vic[1] < .08) (per[vic[0]] = per[vic[0]] || []).push(p); else resta.push(p);
+    }
+    if (!resta.length || !Object.keys(per).length) continue;
+    f.geometry = { type: "MultiPolygon", coordinates: resta };
+    for (const [c, ps] of Object.entries(per)) nuove.push({ type: "Feature", properties: { c }, geometry: { type: "MultiPolygon", coordinates: ps } });
+  }
+  return fs.concat(nuove);
+}
 function preparaMappa() {
   const box = $("#mappa");
   box.innerHTML = `<canvas id="cv"></canvas>`;
@@ -236,22 +256,31 @@ function main(c) {
   if (M.main[c]) return M.main[c];
   const g = parteMain(c);
   let r = null;
-  if (g) { const b = M.gp.bounds(g); r = { b, lbl: M.proj(d3.geoCentroid(g.big)) }; }
+  if (g) { const lbl = M.proj(d3.geoCentroid(g.big)); r = { b: riquadroVicino(g, lbl[0]), lbl }; }
   else if (P[c]) { const xy = M.proj([P[c].ll[1], P[c].ll[0]]); r = { b: [[xy[0] - 1, xy[1] - 1], [xy[0] + 1, xy[1] + 1]], lbl: xy }; }
   return (M.main[c] = r);
+}
+/* Riquadro di una forma sulla mappa, ma solo dalla parte del suo centro: Nuova Zelanda (isole Chatham), Russia (Ciukotka)
+   e Figi passano la linea del cambio di data, e un pezzetto finisce all'altro capo della mappa (il volo inquadrava il mondo intero). */
+function riquadroVicino(g, lx) {
+  const b = [[Infinity, Infinity], [-Infinity, -Infinity]], soglia = (M.W - 20) / 2;
+  const punto = (x, y) => { if (Math.abs(x - lx) > soglia) return; b[0][0] = Math.min(b[0][0], x); b[1][0] = Math.max(b[1][0], x); b[0][1] = Math.min(b[0][1], y); b[1][1] = Math.max(b[1][1], y); };
+  const nulla = () => {};
+  d3.geoStream(g, M.proj.stream({ point: punto, lineStart: nulla, lineEnd: nulla, polygonStart: nulla, polygonEnd: nulla, sphere: nulla }));
+  return isFinite(b[0][0]) ? b : M.gp.bounds(g);
 }
 const richiedi = () => { if (!M.raf) M.raf = requestAnimationFrame(disegna); };
 // paesi piccoli o senza forma (Malta, Vaticano, isole): un pallino se sono segnati
 const PICCOLO = 6;   // pixel a zoom 1
-function puntiPiccoli(st) {
+// tutti = anche quelli non segnati (si vedono e si toccano quando la mappa è ingrandita: Malta, San Marino, Vaticano…)
+const PICCOLI_DA = 3.5;   // ingrandimento da cui compaiono i paesi piccoli non segnati
+function puntiPiccoli(st, tutti) {
   const out = [];
   for (const p of PAESI) {
-    const s = st[p.c]; if (!s) continue;
-    const fs = M.byC[p.c];
-    const big = fs && fs.some(x => Math.max(x.b[1][0] - x.b[0][0], x.b[1][1] - x.b[0][1]) * M.t.k >= PICCOLO);
-    if (big) continue;
-    const xy = fs ? fs.reduce((a, x) => x.a > a.a ? x : a).cen : M.proj([p.ll[1], p.ll[0]]);
-    if (xy && isFinite(xy[0])) out.push({ c: p.c, s, xy });
+    const s = st[p.c] || null; if (!s && !tutti) continue;
+    const m = main(p.c); if (!m) continue;
+    if (Math.max(m.b[1][0] - m.b[0][0], m.b[1][1] - m.b[0][1]) * M.t.k >= PICCOLO) continue;
+    if (m.lbl && isFinite(m.lbl[0])) out.push({ c: p.c, s, xy: m.lbl });
   }
   return out;
 }
@@ -297,15 +326,23 @@ function disegna(now) {
     ctx.lineWidth = 2.2 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .75;
     M.byC[M.scelto].forEach(f => ctx.stroke(f.p)); ctx.globalAlpha = 1;
   }
+  // paese scelto piccolissimo (Malta, Vaticano, isole): un cerchio intorno, altrimenti non si vede quale è
+  const sm = M.scelto && main(M.scelto);
+  if (sm && Math.max(sm.b[1][0] - sm.b[0][0], sm.b[1][1] - sm.b[0][1]) * t.k < 16) {
+    ctx.beginPath(); ctx.arc(sm.lbl[0], sm.lbl[1], 13 / t.k, 0, 7);
+    ctx.lineWidth = 2.2 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .75; ctx.stroke(); ctx.globalAlpha = 1;
+  }
   // tocco: il paese si illumina un attimo
   if (M.flash) {
     const k = (now - M.flash.t0) / 450;
     if (k < 1) { ctx.globalAlpha = .35 * (1 - k); ctx.fillStyle = "#fff"; (M.byC[M.flash.c] || []).forEach(f => ctx.fill(f.p)); ctx.globalAlpha = 1; vivo = true; } else M.flash = null;
   }
   // pallini dei paesi piccoli (grandezza fissa sullo schermo)
-  if (!M.intro || ip > .6) for (const d of puntiPiccoli(st)) {
-    ctx.beginPath(); ctx.arc(d.xy[0], d.xy[1], 4.5 / t.k, 0, 7);
-    ctx.fillStyle = COL[d.s]; ctx.fill(); ctx.lineWidth = 1.5 / t.k; ctx.strokeStyle = COL.line; ctx.stroke();
+  // (quando la mappa è ingrandita anche quelli non segnati, più piccoli e del colore della terra: così si possono toccare)
+  if (!M.intro || ip > .6) for (const d of puntiPiccoli(st, t.k >= PICCOLI_DA)) {
+    ctx.beginPath(); ctx.arc(d.xy[0], d.xy[1], (d.s ? 4.5 : 3.4) / t.k, 0, 7);
+    if (d.s) { ctx.fillStyle = COL[d.s]; ctx.fill(); ctx.lineWidth = 1.5 / t.k; ctx.strokeStyle = COL.line; ctx.stroke(); }
+    else { ctx.fillStyle = COL.land; ctx.fill(); ctx.lineWidth = 1.3 / t.k; ctx.strokeStyle = COL.ink; ctx.globalAlpha = .5; ctx.stroke(); ctx.globalAlpha = 1; }
   }
   // onde quando si segna un paese nuovo
   M.onde = M.onde.filter(o => {
@@ -396,26 +433,53 @@ function onda(c, s) {
   if (m) { M.onde.push({ xy: [(m.b[0][0] + m.b[1][0]) / 2, (m.b[0][1] + m.b[1][1]) / 2], s, t0: performance.now() + 150 }); richiedi(); }
 }
 function tocca(e) {
-  if (e.defaultPrevented) return;
+  if (e.defaultPrevented || inApertura) return;
+  /* Foglio a metà aperto (dalla mappa): la mappa sopra resta viva. Un altro paese → si passa a quello;
+     lo stesso paese o il mare → si chiude. Ma non subito dopo l'apertura (secondo tocco di un doppio tocco)
+     e non se si sta scrivendo o si è appena chiuso il calendario (su iPhone quel tocco arriva fin qui). */
+  const aperto = pila.length > 0;
+  if (aperto) {
+    if (!document.documentElement.classList.contains("meta") || Date.now() - apertoAlle < 450) return;
+    const a = document.activeElement;
+    if (a && a.matches("input,textarea,select")) { a.blur(); return; }
+    if (Date.now() - ultimoCampo < 700) return;
+  }
   const r = M.cv.getBoundingClientRect(), t = M.t;
   const px = (e.clientX - r.left - t.x) / t.k, py = (e.clientY - r.top - t.y) / t.k;
-  // prima i pallini dei paesi piccoli, poi le forme (dalla più piccola: le isole dentro i laghi, il Vaticano…)
+  // prima i pallini dei paesi piccoli segnati, poi le forme (dalla più piccola: le isole dentro i laghi…),
+  // poi i pallini dei paesi piccoli non segnati (vincono sulla forma intorno solo se il tocco è proprio sopra)
   let hit = null, best = 1e9;
-  for (const d of puntiPiccoli(M.st || {})) {
-    const dd = Math.hypot((d.xy[0] - px) * t.k, (d.xy[1] - py) * t.k);
-    if (dd < 18 && dd < best) { best = dd; hit = d.c; }
-  }
+  const piccoli = puntiPiccoli(M.st || {}, t.k >= PICCOLI_DA).map(d => ({ ...d, dd: Math.hypot((d.xy[0] - px) * t.k, (d.xy[1] - py) * t.k) }));
+  for (const d of piccoli) if (d.s && d.dd < 18 && d.dd < best) { best = d.dd; hit = d.c; }
   if (!hit) {
     const ctx = M.ctx; ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
     const cand = M.feats.filter(f => px >= f.b[0][0] && px <= f.b[1][0] && py >= f.b[0][1] && py <= f.b[1][1]).sort((a, b) => a.a - b.a);
     for (const f of cand) if (ctx.isPointInPath(f.p, px, py)) { hit = f.c; break; }
     ctx.restore();
+    const vicino = piccoli.filter(d => !d.s && d.c !== "AQ" && d.dd < (hit ? 9 : 16)).sort((a, b) => a.dd - b.dd)[0];
+    if (vicino) hit = vicino.c;
   }
-  if (!hit || !P[hit] || pila.length || inApertura) return;   // foglio già aperto o in apertura (doppio tocco)
+  if (hit && !P[hit]) hit = null;
+  if (aperto) {
+    const radice = pila[0];
+    if (!hit || (radice.tipo === "paese" && radice.c === hit)) { chiudiTutto(); return; }
+    tocco();
+    M.flash = { c: hit, t0: performance.now() }; richiedi();
+    cambiaPaese(hit);
+    return;
+  }
+  if (!hit) return;
   tocco();
   M.flash = { c: hit, t0: performance.now() }; richiedi();
   inApertura = true;
   setTimeout(() => { if (inApertura) apriLivello({ tipo: "paese", c: hit, meta: true }); }, 90);
+}
+// dal foglio a metà a un altro paese: il foglio resta aperto e cambia contenuto (se c'erano città o posti aperti, si torna prima al primo livello)
+let dopoRitorno = null;
+function cambiaPaese(c) {
+  const l = { tipo: "paese", c, meta: true };
+  if (pila.length <= 1) { sostituisciLivello(l); apertoAlle = Date.now(); return; }
+  dopoRitorno = l; history.go(-(pila.length - 1));
 }
 // limiti del trascinamento: più larghi quando si vola su un paese (Cile, Sudafrica… finirebbero sotto il foglio)
 const limiti = largo => largo ? [[-M.W, -M.H], [M.W * 2, M.H * 2]] : [[-M.W * .3, -M.H * .1], [M.W * 1.3, M.H * 1.1]];
@@ -870,7 +934,13 @@ window.addEventListener("popstate", () => {
   const st = history.state || {};
   if (viewerAperto && !st.foto) { viewerAperto = false; $("#viewer").classList.remove("on"); liberaGrandi(); }
   const l = st.l || 0;
-  if (l < pila.length) { pila.length = l; if (l === 0) chiudiFoglio(); else mostra(false); }
+  if (l < pila.length) {
+    pila.length = l;
+    const dopo = dopoRitorno; dopoRitorno = null;
+    if (l === 0) chiudiFoglio();
+    else if (dopo && l === 1) { sostituisciLivello(dopo); apertoAlle = Date.now(); }
+    else mostra(false);
+  }
 });
 // [meta, colore originale, "media" originale]: il tema scelto a mano in index.html li cambia, ma prima se li segna
 const COLORI_BARRA = $$('meta[name="theme-color"]').map(m => [m, m.dataset.orig || m.content, m.dataset.media ?? (m.getAttribute("media") || "")]);
@@ -888,7 +958,7 @@ function modoFoglio(top) {
   sfondo(!meta);
   const c = top.tipo === "paese" || top.tipo === "mv" ? top.c : top.tipo === "citta" ? dati.citta[top.id]?.c : null;
   M.scelto = meta ? c : null;
-  if (!meta) M.stelle = null;
+  if (!meta || (M.stelle && M.stelle.c !== c)) M.stelle = null;
   const x = top.tipo === "citta" ? dati.citta[top.id] : null;
   const r = top.tipo === "mv" ? (CONSIGLI.get(top.c) || []).find(z => z[0] === top.q) : null;
   M.pin = meta && x && x.ll ? { ll: x.ll, s: x.s || "w" } : meta && r ? { ll: [r[3], r[4]], s: visto(r[0]) ? "l" : "w" } : null;
@@ -1041,6 +1111,9 @@ function miniMappa(c, selId) {
   const gp = d3.geoPath(proj);
   const s = statoPaese(c);
   const nb = new Set(p.b || []);
+  // paese piccolissimo anche nel riquadro (Malta, San Marino): un cerchio intorno
+  const bq = fs.length ? gp.bounds(obiettivo) : null;
+  const anello = bq && Math.max(bq[1][0] - bq[0][0], bq[1][1] - bq[0][1]) < 34 ? [(bq[0][0] + bq[1][0]) / 2, (bq[0][1] + bq[1][1]) / 2] : null;
   // vicini e paesi che entrano nel riquadro
   const box = [[-40, -40], [W + 40, H + 40]];
   const altri = M.feats.filter(f => f.c !== c && (nb.has(f.c) || (() => { const b = gp.bounds(f.f); return b[1][0] > box[0][0] && b[0][0] < box[1][0] && b[1][1] > box[0][1] && b[0][1] < box[1][1] && (b[1][0] - b[0][0]) < W * 30; })()));
@@ -1050,6 +1123,7 @@ function miniMappa(c, selId) {
   return `<div class="mini"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
     ${altri.map(f => `<path class="vic" d="${gp(f.f)}"/>`).join("")}
     ${fs.length ? fs.map(f => `<path class="qui${s ? " s-" + s : ""}" pathLength="1" d="${gp(f.f)}"/>`).join("") : (([x, y]) => `<circle class="qui solo${s ? " s-" + s : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20"/><text class="lbl" x="${x.toFixed(1)}" y="${(y + 52).toFixed(1)}" text-anchor="middle">${esc(p.n)}</text>`)(proj([p.ll[1], p.ll[0]]))}
+    ${anello ? `<circle class="anello" cx="${anello[0].toFixed(1)}" cy="${anello[1].toFixed(1)}" r="30"/>` : ""}
     ${pts.map((o, i) => `<circle style="--i:${Math.min(i, 10)}" class="cit s-${o.x.s || "w"}${o.x.id === selId ? " sel" : ""}" cx="${o.xy[0].toFixed(1)}" cy="${o.xy[1].toFixed(1)}" r="${o.x.id === selId ? 10 : 7}"/>`).join("")}
     ${etichette ? pts.filter(o => !selId || o.x.id === selId || pts.length <= 8).map(o => `<text class="lbl" x="${(o.xy[0] + 16).toFixed(1)}" y="${(o.xy[1] + 7).toFixed(1)}" ${o.xy[0] > W - 180 ? `text-anchor="end" dx="-32"` : ""}>${esc(o.x.n)}</text>`).join("") : ""}
   </svg></div>`;
@@ -1158,7 +1232,7 @@ function disegnaConsigli(box, top, c, righe) {
   if (!righe) { box.innerHTML = ""; return; }
   const lista = sceltaConsigli(righe, top);
   top.mv = lista;
-  if (top.meta) { M.stelle = lista.map(r => ({ ll: [r[3], r[4]], q: r[0] })); richiedi(); }
+  if (top.meta) { M.stelle = Object.assign(lista.map(r => ({ ll: [r[3], r[4]], q: r[0] })), { c }); richiedi(); }
   if (!lista.length) { box.innerHTML = ""; return; }
   const nome = top.tipo === "citta" ? dati.citta[top.id].n : null;
   const s = top.tipo === "citta" ? dati.citta[top.id].s : statoPaese(c);
@@ -2105,6 +2179,7 @@ addEventListener("pagehide", salvaSubito);
     MONDO = topojson.feature(mo, mo.objects.countries).features;
     // forme che passano la linea del cambio di data (Russia, Figi): se risultano "rovesciate" si girano i bordi
     MONDO.forEach(f => { if (d3.geoArea(f) > 2 * Math.PI) { const g = f.geometry; (g.type === "Polygon" ? [g.coordinates] : g.coordinates).forEach(p => { if (d3.geoArea({ type: "Polygon", coordinates: p }) > 2 * Math.PI) p.forEach(r => r.reverse()); }); } });
+    MONDO = separaOltremare(MONDO);
   } catch (e) {
     $("#mappa").innerHTML = `<div class="caric">Non riesco a caricare la mappa: controlla internet e riapri l'app.</div>`;
     return;
