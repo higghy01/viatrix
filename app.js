@@ -296,6 +296,12 @@ function disegna(now) {
     ctx.globalAlpha = 1;
     return true;
   });
+  // i posti da non perdere del paese aperto: puntini bianchi (verdi se già visti)
+  if (M.stelle && M.scelto) for (const st of M.stelle) {
+    const [px, py] = M.proj([st.ll[1], st.ll[0]]);
+    ctx.beginPath(); ctx.arc(px, py, 4.2 / t.k, 0, 7); ctx.fillStyle = visto(st.q) ? COL.l : "#fff"; ctx.fill();
+    ctx.lineWidth = 1.6 / t.k; ctx.strokeStyle = COL.w; ctx.stroke();
+  }
   // la città aperta: un segnaposto sulla mappa grande
   if (M.pin) {
     const [px, py] = M.proj([M.pin.ll[1], M.pin.ll[0]]);
@@ -570,7 +576,9 @@ const TROFEI = [
   ["volo", "✈️", "In volo", "Un viaggio in aereo", S => S.mz.has("aereo")],
   ["binari", "🚆", "Sui binari", "Un viaggio in treno", S => S.mz.has("treno")],
   ["mare", "⛴️", "Per mare", "Un viaggio in nave", S => S.mz.has("nave")],
-  ["strada", "🚗", "Su strada", "Auto, camper o moto", S => ["auto", "camper", "moto"].some(m => S.mz.has(m))]
+  ["strada", "🚗", "Su strada", "Auto, camper o moto", S => ["auto", "camper", "moto"].some(m => S.mz.has(m))],
+  ["meraviglia", "🌟", "Prima meraviglia", "Segna un posto da non perdere", S => S.mv >= 1],
+  ["meraviglie10", "🎟️", "Dieci meraviglie", "10 posti da non perdere visti", S => S.mv >= 10]
 ];
 function statistiche() {
   const k = conti();
@@ -587,7 +595,7 @@ function statistiche() {
   const mz = new Map();
   [...Object.values(dati.paesi), ...Object.values(dati.citta)].filter(x => x.s === "v" || x.s === "l").forEach(x => (x.mezzi || []).forEach(m => proprio(MZ, m) && mz.set(m, (mz.get(m) || 0) + 1)));
   return { ...k, n: k.onu.length, nCitta: citta.length, nFoto, gg, per, cont, nCont: cont.filter(x => x.f).length,
-    contSet: new Set(cont.filter(x => x.f).map(x => x.c)), mz, anno: per.length ? new Date(per[0][0] * 864e5).getUTCFullYear() : null };
+    contSet: new Set(cont.filter(x => x.f).map(x => x.c)), mz, mv: Object.keys(dati.meraviglie || {}).length, anno: per.length ? new Date(per[0][0] * 864e5).getUTCFullYear() : null };
 }
 
 /* Premi: nuovo livello o traguardo → festa (una alla volta) */
@@ -826,16 +834,18 @@ function sfondo(on) {
 /* Foglio a metà (aperto dalla mappa): sopra si vede il paese, che si colora dal vivo */
 function modoFoglio(top) {
   const sh = $("#sheet"), root = document.documentElement;
-  const meta = !!top.meta && (top.tipo === "paese" || top.tipo === "citta");
+  const meta = !!top.meta && (top.tipo === "paese" || top.tipo === "citta" || top.tipo === "mv");
   sh.classList.toggle("meta", meta); root.classList.toggle("meta", meta);
   $("#scrim").classList.toggle("trasp", meta);
   sfondo(!meta);
-  const c = top.tipo === "paese" ? top.c : top.tipo === "citta" ? dati.citta[top.id]?.c : null;
+  const c = top.tipo === "paese" || top.tipo === "mv" ? top.c : top.tipo === "citta" ? dati.citta[top.id]?.c : null;
   M.scelto = meta ? c : null;
+  if (!meta) M.stelle = null;
   const x = top.tipo === "citta" ? dati.citta[top.id] : null;
-  M.pin = meta && x && x.ll ? { ll: x.ll, s: x.s || "w" } : null;
+  const r = top.tipo === "mv" ? (CONSIGLI.get(top.c) || []).find(z => z[0] === top.q) : null;
+  M.pin = meta && x && x.ll ? { ll: x.ll, s: x.s || "w" } : meta && r ? { ll: [r[3], r[4]], s: visto(r[0]) ? "l" : "w" } : null;
   richiedi();
-  if (meta && c && tabAttiva === "mappa") { if (top.tipo === "paese") volaAPaese(c, true); else volaACitta(dati.citta[top.id], true); }
+  if (meta && c && tabAttiva === "mappa") { if (top.tipo === "paese") volaAPaese(c, true); else if (top.tipo === "citta") volaACitta(dati.citta[top.id], true); else if (r) volaACitta({ c, ll: [r[3], r[4]] }, true); }
   tingi(top);
 }
 function tingi(top) {
@@ -853,7 +863,7 @@ function mostra(avanti) {
   const top = pila[pila.length - 1];
   if (!top) return;
   const sh = $("#sheet"), giaAperto = sh.classList.contains("on");
-  const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : top.tipo === "stat" ? htmlStat() : htmlImp();
+  const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : top.tipo === "stat" ? htmlStat() : top.tipo === "mv" ? htmlMv(top) : htmlImp();
   if (html == null) { indietro(); return; }
   const fai = () => {
     sh.innerHTML = `<div class="grab" data-grab></div>` + html;
@@ -877,7 +887,7 @@ function mostra(avanti) {
 function chiudiFoglio() {
   pila.length = 0;
   document.documentElement.classList.remove("meta");
-  M.scelto = null; M.pin = null; richiedi();
+  M.scelto = null; M.pin = null; M.stelle = null; richiedi();
   rientra();
   $("#sheet").classList.remove("on");
   $("#scrim").classList.remove("on");
@@ -1001,6 +1011,7 @@ function htmlPaese(c) {
     <div class="blk-h">Questo paese</div>
     ${htmlStato(d.s || null, statoPaese(c))}
     <div id="viaggio">${htmlViaggio(d)}</div>
+    <div id="consigli"></div>
     <div class="blk-h">Città <small>${cs.length ? cs.length + (cs.length === 1 ? " città" : " città") : ""}</small></div>
     <div class="card citta">
       ${cs.map(x => `<button class="riga" data-citta="${esc(x.id)}"><span class="dot" style="--c:var(${STATI[x.s || "w"].cv})"></span>
@@ -1022,6 +1033,7 @@ function htmlCitta(id) {
     <div class="blk-h">Questa città</div>
     ${htmlStato(x.s || null)}
     <div id="viaggio">${htmlViaggio(x)}</div>
+    <div id="consigli"></div>
     ${htmlFoto(keyCitta(id))}
     ${htmlNota(x)}
     <button class="btn rosso" id="b-togli">Togli questa città</button>
@@ -1029,6 +1041,147 @@ function htmlCitta(id) {
 }
 
 /* ---------- Scegli una città ---------- */
+/* ---------- Da non perdere: i posti più famosi di ogni paese e città ----------
+   Dati preparati da scripts/consigli.py (Wikidata: la fama = in quante lingue c'è la pagina Wikipedia).
+   Riga: [id, nome, descrizione, lat, lon, foto, titolo it.wikipedia, titolo en.wikipedia, fama, tipo].
+   La spunta "visto" resta sul telefono (dati.meraviglie). Foto da Wikimedia Commons, testo da Wikipedia. */
+const CONSIGLI = new Map();
+async function caricaConsigli(c) {
+  if (CONSIGLI.has(c)) return CONSIGLI.get(c);
+  try { const r = await fetch(`data/consigli/${c}.json`); const d = r.ok ? await r.json() : []; CONSIGLI.set(c, Array.isArray(d) ? d : []); }
+  catch (e) { return null; }   // senza rete: si riprova la prossima volta
+  return CONSIGLI.get(c);
+}
+const TIPO_MV = { museo: ["🖼️", "Museo"], chiesa: ["⛪", "Chiesa"], tempio: ["🛕", "Luogo sacro"], castello: ["🏰", "Castello"], palazzo: ["👑", "Palazzo"],
+  rovine: ["🏛️", "Sito antico"], piazza: ["🏙️", "Piazza"], ponte: ["🌉", "Ponte"], torre: ["🗼", "Torre"], monumento: ["⛲", "Monumento"],
+  parco: ["🌳", "Parco"], montagna: ["⛰️", "Montagna"], acqua: ["🏞️", "Natura"], citta: ["🏘️", "Borgo storico"], teatro: ["🎭", "Teatro"], luogo: ["⭐", "Da vedere"] };
+const tipoMv = t => TIPO_MV[proprio(TIPO_MV, t) ? t : "luogo"];
+const fotoWiki = (f, w) => f ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(f)}?width=${w}` : "";
+const visto = q => !!(dati.meraviglie && dati.meraviglie[q]);
+const kmTra = (a, b, c, d) => { const r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
+// i posti da mostrare: per un paese i 12 più famosi, per una città gli 8 più famosi entro 10 km
+function sceltaConsigli(righe, top) {
+  if (top.tipo === "citta") {
+    const x = dati.citta[top.id]; if (!x || !x.ll) return [];
+    return righe.filter(r => kmTra(x.ll[0], x.ll[1], r[3], r[4]) <= 10).slice(0, 8);
+  }
+  return righe.slice(0, 12);
+}
+async function riempiConsigli(top) {
+  const box = $("#consigli"); if (!box) return;
+  const c = top.tipo === "paese" ? top.c : dati.citta[top.id]?.c;
+  const righe = await caricaConsigli(c);
+  if (pila[pila.length - 1] !== top || !$("#consigli")) return;
+  if (!righe) { box.innerHTML = ""; return; }
+  const lista = sceltaConsigli(righe, top);
+  top.mv = lista;
+  if (top.meta) { M.stelle = lista.map(r => ({ ll: [r[3], r[4]], q: r[0] })); richiedi(); }
+  if (!lista.length) { box.innerHTML = ""; return; }
+  const nome = top.tipo === "citta" ? dati.citta[top.id].n : null;
+  const s = top.tipo === "citta" ? dati.citta[top.id].s : statoPaese(c);
+  const quanti = top.tutti ? lista.length : Math.min(lista.length, top.tipo === "citta" ? 4 : 6);
+  box.innerHTML = `<div class="blk-h">Da non perdere${nome ? " a " + esc(nome) : ""} <small id="mv-n">${contaVisti(lista)}</small></div>
+    <p class="piccolo mv-intro">${(top.tipo === "citta" ? dati.citta[top.id].s : (dati.paesi[c] || {}).s) === "w" ? "Quando ci andrai: i posti più famosi, da segnare con ✓ quando li vedi." : s ? "Tocca ✓ sui posti che hai visto." : "I posti più famosi, secondo Wikipedia."}</p>
+    <div class="mv-grid">${lista.slice(0, quanti).map((r, i) => cartaMv(r, i)).join("")}</div>
+    ${lista.length > quanti ? `<button class="allbtn" id="mv-altri">Mostra altri ${lista.length - quanti}</button>` : ""}`;
+  collegaMv(box, top);
+}
+const contaVisti = l => { const n = l.filter(r => visto(r[0])).length; return n ? `${n} di ${l.length} visti` : `${l.length} posti`; };
+function cartaMv(r, i) {
+  const [e] = tipoMv(r[9]);
+  return `<div class="mv" style="--i:${Math.min(i, 8)}">
+    <button class="mv-apri" data-mv="${esc(r[0])}"><span class="mv-img" data-e="${e}">${r[5] ? `<img src="${esc(fotoWiki(r[5], 360))}" alt="" loading="lazy" decoding="async">` : ""}</span>
+      <span class="mv-t"><b>${esc(r[1])}</b><small>${esc(r[2] || tipoMv(r[9])[1])}</small></span></button>
+    <button class="mv-ok" data-visto="${esc(r[0])}" aria-pressed="${visto(r[0])}" aria-label="Visto: ${esc(r[1])}">✓</button></div>`;
+}
+// foto: dissolvenza quando arriva, emoji del tipo se non c'è o non si carica
+function legaFoto(el) {
+  el.querySelectorAll(".mv-img img:not([data-l])").forEach(im => {
+    im.dataset.l = 1;
+    const ok = () => im.classList.add("ok"), ko = () => im.remove();
+    if (im.complete && im.naturalWidth) ok(); else { im.addEventListener("load", ok, { once: true }); im.addEventListener("error", ko, { once: true }); }
+  });
+}
+function collegaMv(box, top) {
+  legaFoto(box);
+  // "Mostra altri": si aggiungono solo quelli nuovi, gli altri restano fermi
+  box.querySelector("#mv-altri")?.addEventListener("click", e => {
+    tocco(); top.tutti = true;
+    const g = box.querySelector(".mv-grid"), gia = g.children.length;
+    g.insertAdjacentHTML("beforeend", top.mv.slice(gia).map((r, i) => cartaMv(r, i)).join(""));
+    legaFoto(g); e.currentTarget.remove();
+  });
+  box.onclick = e => {
+    const v = e.target.closest("[data-visto]");
+    if (v) { segnaVisto(v.dataset.visto, v, top); return; }
+    const a = e.target.closest("[data-mv]");
+    if (a) { tocco(); apriLivello({ tipo: "mv", c: top.tipo === "paese" ? top.c : dati.citta[top.id].c, q: a.dataset.mv, meta: top.meta }); }
+  };
+}
+function segnaVisto(q, b, top) {
+  tocco();
+  dati.meraviglie = dati.meraviglie || {};
+  const ora = !visto(q);
+  if (ora) dati.meraviglie[q] = 1; else delete dati.meraviglie[q];
+  salva();
+  $$(`[data-visto="${CSS.escape(q)}"]`).forEach(x => x.setAttribute("aria-pressed", ora));
+  if (top && top.mv && $("#mv-n")) $("#mv-n").textContent = contaVisti(top.mv);
+  if (ora && b && !pocoMoto()) {
+    b.animate?.([{ transform: "scale(1)" }, { transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 450, easing: "cubic-bezier(.34,1.56,.64,1)" });
+    const r = b.getBoundingClientRect(); coriandoli(r.left + r.width / 2, r.top + r.height / 2, { n: 18, forza: 5, apertura: 3, colori: [COL.l, COL.w, "#fff"] });
+  }
+  if (M.pin && pila[pila.length - 1]?.tipo === "mv") M.pin.s = ora ? "l" : "w";
+  richiedi();
+  dopoCambio(null);
+}
+
+/* La pagina di un posto: foto grande, testo di Wikipedia, "L'ho visto", Mappe */
+function htmlMv(top) {
+  const r = (CONSIGLI.get(top.c) || []).find(x => x[0] === top.q); if (!r) return null;
+  const [e, t] = tipoMv(r[9]);
+  const mappe = suIOS() ? `https://maps.apple.com/?ll=${r[3]},${r[4]}&q=${encodeURIComponent(r[1])}` : `https://www.google.com/maps/search/?api=1&query=${r[3]},${r[4]}`;
+  const wiki = r[6] ? `https://it.wikipedia.org/wiki/${encodeURIComponent(r[6].replace(/ /g, "_"))}` : r[7] ? `https://en.wikipedia.org/wiki/${encodeURIComponent(r[7].replace(/ /g, "_"))}` : "";
+  return `${barraFoglio()}<div class="sh-body">
+    <div class="mv-hero" data-e="${e}">${r[5] ? `<img src="${esc(fotoWiki(r[5], 900))}" alt="">` : ""}</div>
+    <div class="kicker" style="margin-top:14px">${e} ${t} · ${bandiera(top.c)} ${esc(P[top.c]?.n || "")}</div>
+    <h2 class="mv-h">${esc(r[1])}</h2>
+    ${r[2] ? `<p class="mv-desc">${esc(r[2])}</p>` : ""}
+    <p class="mv-testo" id="mv-testo">${r[6] || r[7] ? "Carico da Wikipedia…" : ""}</p>
+    <button class="btn ${visto(r[0]) ? "pieno" : "ghost"}" id="mv-visto" data-q="${esc(r[0])}">${visto(r[0]) ? "✓ L'hai visto" : "L'ho visto"}</button>
+    <div class="row2"><a class="btn ghost" href="${esc(mappe)}" target="_blank" rel="noopener">🧭 Mappe</a>${wiki ? `<a class="btn ghost" href="${esc(wiki)}" target="_blank" rel="noopener">📖 Wikipedia</a>` : ""}</div>
+    <p class="about">Testo: Wikipedia (CC BY-SA) · Foto: Wikimedia Commons · Dati: Wikidata</p>
+  </div>`;
+}
+const RIASSUNTI = new Map();
+async function collegaMvPagina(top) {
+  const r = (CONSIGLI.get(top.c) || []).find(x => x[0] === top.q); if (!r) return;
+  const hero = $(".mv-hero img");
+  if (hero) { const ok = () => hero.classList.add("ok"); if (hero.complete && hero.naturalWidth) ok(); else { hero.addEventListener("load", ok, { once: true }); hero.addEventListener("error", () => hero.remove(), { once: true }); } }
+  $("#mv-visto").addEventListener("click", e => {
+    const b = e.currentTarget; segnaVisto(r[0], b, null);
+    b.className = "btn " + (visto(r[0]) ? "pieno" : "ghost"); b.textContent = visto(r[0]) ? "✓ L'hai visto" : "L'ho visto";
+  });
+  const p = $("#mv-testo"); if (!p || (!r[6] && !r[7])) return;
+  // riassunto dalla Wikipedia italiana (o inglese se manca); testo semplice, mai HTML
+  const chiave = r[0];
+  let testo = RIASSUNTI.get(chiave);
+  if (!testo) {
+    for (const [lingua, tit] of [["it", r[6]], ["en", r[7]]]) {
+      if (!tit) continue;
+      try {
+        const res = await fetch(`https://${lingua}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(tit.replace(/ /g, "_"))}`);
+        if (!res.ok) continue;
+        const d = await res.json();
+        if (typeof d.extract === "string" && d.extract.trim()) { testo = { t: d.extract.trim(), en: lingua === "en" }; break; }
+      } catch (e) {}
+    }
+    if (testo) RIASSUNTI.set(chiave, testo);
+  }
+  if (!$("#mv-testo")) return;
+  p.textContent = testo ? testo.t + (testo.en ? " (da Wikipedia in inglese)" : "") : "Il testo di Wikipedia arriva quando c'è internet.";
+  if (testo && p.animate && !pocoMoto()) p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400 });
+}
+
 const CITTA = new Map();   // paese → { r, c, idx } (caricate quando servono)
 async function caricaCitta(c) {
   if (CITTA.has(c)) return CITTA.get(c);
@@ -1100,7 +1253,7 @@ function htmlImp() {
     <div id="b-conf"></div>
     <button class="btn rosso" id="b-canc" style="margin-top:28px">Cancella tutto</button>
     ${statAttive() && adminDentro() ? `<button class="btn ghost" id="b-stat" style="margin-top:12px">📊 Statistiche (solo per te)</button>` : ""}
-    <p class="about" id="b-ver">Viatrix · versione ${VERSIONE_APP}<br>Mappa: Natural Earth · Città: GeoNames</p>
+    <p class="about" id="b-ver">Viatrix · versione ${VERSIONE_APP}<br>Mappa: Natural Earth · Città: GeoNames<br>Posti da non perdere: Wikidata · Foto: Wikimedia Commons · Testi: Wikipedia</p>
   </div>`;
 }
 
@@ -1125,6 +1278,7 @@ function collega(top) {
   }
   if (top.tipo === "imp") collegaImp();
   if (top.tipo === "stat") collegaStat();
+  if (top.tipo === "mv") collegaMvPagina(top);
 }
 function collegaLuogo(top) {
   const sh = $("#sheet");
@@ -1132,6 +1286,7 @@ function collegaLuogo(top) {
   const c = paese ? top.c : dati.citta[top.id]?.c;
   const kFoto = paese ? keyPaese(c) : keyCitta(top.id);
   const rec = () => paese ? (dati.paesi[c] = dati.paesi[c] || { s: null, mezzi: [] }) : dati.citta[top.id];
+  riempiConsigli(top);
   // stato: visitato / ci vivo / vorrei andarci
   sh.querySelector(".seg").addEventListener("click", e => {
     const b = e.target.closest("[data-stato]"); if (!b) return;
@@ -1147,6 +1302,7 @@ function collegaLuogo(top) {
     if (nuovo && !cera && vb.animate && !pocoMoto()) vb.animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: 420, easing: MOLLA });
     aggiornaMini(top);
     tingi(top);
+    const intro = $(".mv-intro"); if (intro) intro.textContent = d.s === "w" ? "Quando ci andrai: i posti più famosi, da segnare con ✓ quando li vedi." : statoPaese(c) || d.s ? "Tocca ✓ sui posti che hai visto." : "I posti più famosi, secondo Wikipedia.";
     // la festa: coriandoli dal pulsante, stelline per i sogni
     if (d.s && !pocoMoto()) {
       const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 3;
@@ -1291,7 +1447,7 @@ function collegaImp() {
     try {
       await DB.sostituisci({ paesi: {}, citta: {} }, []);
       programmaStat(1000);
-      dati = { paesi: {}, citta: {}, visti: [], liv: 0 }; FOTO.clear(); pctPrima = -1;
+      dati = { paesi: {}, citta: {}, visti: [], liv: 0, meraviglie: {} }; FOTO.clear(); pctPrima = -1;
       chiudiTutto(); toast("Tutto cancellato");
     } catch (er) { toast("Non riesco a cancellare"); }
   });
@@ -1350,7 +1506,7 @@ const CODICE = /^[A-Z]{2}$/;
 // un'immagine vera in formato testo (niente virgolette o altro che possa uscire dall'attributo src)
 const IMG_OK = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/;
 function pulisciDati(d) {
-  const out = { paesi: {}, citta: {}, visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(LIVELLI.length - 1, Math.floor(+d?.liv) || 0)) };
+  const out = { paesi: {}, citta: {}, meraviglie: Object.fromEntries(Object.keys(d?.meraviglie && typeof d.meraviglie === "object" ? d.meraviglie : {}).filter(q => /^Q\d{1,12}$/.test(q)).slice(0, 5000).map(q => [q, 1])), visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(LIVELLI.length - 1, Math.floor(+d?.liv) || 0)) };
   const data = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   const st = v => v === "v" || v === "l" || v === "w" ? v : null;
   const mz = v => Array.isArray(v) ? [...new Set(v.filter(m => proprio(MZ, m)))] : [];
@@ -1481,7 +1637,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.7";
+const VERSIONE_APP = "2.8";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
@@ -1795,7 +1951,7 @@ addEventListener("pagehide", salvaSubito);
     for (let i = 0; ; i++) {
       try {
         const d = await DB.get("stato", "dati"), foto = await DB.all("foto");
-        if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0 };
+        if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0, meraviglie: d.meraviglie || {} };
         sistemaDate(dati);
         FOTO.clear(); foto.forEach(indicizzaFoto);
         break;

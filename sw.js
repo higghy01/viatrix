@@ -1,15 +1,18 @@
 /* Copia dell'app sul telefono: si apre anche senza rete.
    A ogni modifica dei file alzare VERSIONE, altrimenti il telefono resta sulla vecchia. */
-const VERSIONE = "viatrix-v10";
-const FILE = ["./", "index.html", "stile.css?v=10", "app.js?v=10", "config.js?v=10", "lib/d3.min.js", "lib/topojson-client.min.js",
+const VERSIONE = "viatrix-v11";
+const FILE = ["./", "index.html", "stile.css?v=11", "app.js?v=11", "config.js?v=11", "lib/d3.min.js", "lib/topojson-client.min.js",
   "data/paesi.json", "data/mondo.json", "data/globo.json", "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
 // Con la rete lenta (aeroporto, roaming) si aspetta al massimo 3 secondi, poi si apre la copia
 const ATTESA = 3000;
+// Foto dei posti da non perdere (Wikimedia Commons): prima la copia, al massimo 400 foto tenute
+const FOTO_WIKI = "viatrix-foto-wiki";
 let lentaFino = 0;
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSIONE).then(c => c.addAll(FILE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {
   // solo le copie di Viatrix: sullo stesso indirizzo (higghy01.github.io) ci sono anche altre app
-  e.waitUntil(caches.keys().then(k => Promise.all(k.filter(n => n.startsWith("viatrix-") && n !== VERSIONE).map(n => caches.delete(n)))).then(() => self.clients.claim()));
+  // (le foto dei posti da non perdere restano tra una versione e l'altra)
+  e.waitUntil(caches.keys().then(k => Promise.all(k.filter(n => n.startsWith("viatrix-") && n !== VERSIONE && n !== FOTO_WIKI).map(n => caches.delete(n)))).then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", e => {
   const u = new URL(e.request.url);
@@ -37,6 +40,11 @@ self.addEventListener("fetch", e => {
         // se dopo i 3 secondi non c'è nessuna copia, si aspetta comunque la rete (o il suo errore)
       }));
     }
+  } else if ((u.host === "commons.wikimedia.org" && u.pathname.startsWith("/wiki/Special:FilePath/")) || u.host === "upload.wikimedia.org") {
+    e.respondWith(caches.open(FOTO_WIKI).then(c => c.match(e.request).then(r => r || fetch(e.request).then(n => {
+      if (n.ok || n.type === "opaque") e.waitUntil(c.put(e.request, n.clone()).then(() => c.keys()).then(k => Promise.all(k.slice(0, Math.max(0, k.length - 400)).map(x => c.delete(x)))));
+      return n;
+    }))));
   } else if (u.host.endsWith("fonts.googleapis.com") || u.host.endsWith("fonts.gstatic.com")) {
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(n => { const c = n.clone(); caches.open(VERSIONE).then(x => x.put(e.request, c)); return n; })));
   }
