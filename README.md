@@ -11,7 +11,7 @@ Un'app per segnare sulla mappa del mondo i posti che hai visitato:
 - **Paesi**: tutti i paesi divisi per continente, con la ricerca e quanti ne hai visti.
 - **Numeri**: la percentuale del mondo visitato (su 195 paesi), i continenti, i giorni in viaggio, i mezzi più usati e gli ultimi viaggi.
 
-Funziona sull'iPhone come un'app vera: Safari → Condividi → **Aggiungi alla schermata Home**. Si apre anche senza internet.
+Funziona sull'iPhone come un'app vera: Safari → Condividi → **Aggiungi alla schermata Home**. Su Android: il pulsante **Installa Viatrix** nel cartoncino, oppure il menu del browser → **Installa app**. Si apre anche senza internet.
 
 ## I dati
 Città, date, foto e note restano **solo sul telefono** (niente account); al server delle statistiche va solo un riepilogo anonimo (vedi sotto). Nelle Impostazioni (rotellina in Numeri) c'è **Salva una copia**, da tenere per esempio su iCloud Drive.
@@ -22,7 +22,7 @@ Se in `config.js` c'è il progetto Firebase, ogni telefono manda un riepilogo **
 
 ## Come è fatta
 - `index.html`, `stile.css`, `app.js`: l'app. `config.js`: impostazioni pubbliche di Firebase per le statistiche. `sw.js`: la copia per usarla senza rete (a ogni modifica alzare `VERSIONE` e il `?v=`).
-- `data/mondo.json`: confini dei paesi (Natural Earth 1:50m, semplificati). `data/paesi.json`: nomi in italiano, continenti, capitali. `data/citta/XX.json`: le città di ogni paese (GeoNames, da 5000 abitanti; in Italia, San Marino, Vaticano e Malta da 1000), con i nomi in italiano.
+- `data/mondo.json`: confini dei paesi (Natural Earth 1:50m, semplificati; all'avvio l'app separa dalla Francia e dalla Norvegia i territori d'oltremare che lì sono uniti: Guyana francese, Guadalupa, Martinica, Riunione, Mayotte, Svalbard). `data/paesi.json`: nomi in italiano, continenti, capitali. `data/citta/XX.json`: le città di ogni paese (GeoNames, da 5000 abitanti; in Italia, San Marino, Vaticano e Malta da 1000), con i nomi in italiano.
 - `scripts/prepara.py`: rifà i file in `data/` (istruzioni in testa al file).
 - `scripts/consigli.py`: prepara `data/consigli/XX.json`, i posti da non perdere di ogni paese (Wikidata tramite QLever; la fama = in quante lingue c'è la pagina Wikipedia).
 - Librerie: d3 7.9.0 e topojson-client 3.1.0 (in `lib/`).

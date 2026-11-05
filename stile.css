@@ -188,6 +188,7 @@ html.trascina .scrim{transition:none;opacity:var(--p)}
   box-shadow:0 -1px 0 rgba(0,0,0,.04),0 -10px 40px rgba(0,0,0,.14);transform:translateY(105%);transition:transform .55s var(--ios);will-change:transform;
   padding:8px max(18px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 28px) max(18px,env(safe-area-inset-left,0px))}
 .sheet.on{transform:none;visibility:visible}
+.sheet:not(.on){pointer-events:none}
 .sheet:not(.on){transition:transform .42s var(--ios),visibility 0s .42s}
 .sheet.drag{transition:none}
 .sheet.basso{height:auto;max-height:calc(100% - env(safe-area-inset-top,0px) - 22px)}
@@ -285,6 +286,7 @@ textarea.nota{width:100%;min-height:84px;border-radius:16px;border:1px solid var
 .viewer{position:fixed;inset:0;z-index:30;background:rgba(4,6,10,.94);display:grid;place-items:center;opacity:0;visibility:hidden;transition:opacity .3s,visibility 0s .3s;
   padding:calc(env(safe-area-inset-top,0px) + 56px) 12px calc(env(safe-area-inset-bottom,0px) + 84px)}
 .viewer.on{opacity:1;visibility:visible;transition:opacity .3s}
+.viewer:not(.on){pointer-events:none}
 .viewer img{max-width:100%;max-height:100%;border-radius:14px;transform:scale(.94);transition:transform .45s var(--ios);position:relative}
 .viewer.on img{transform:none}
 .viewer .vx{position:absolute;right:14px;top:calc(env(safe-area-inset-top,0px) + 12px);width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center}
@@ -331,6 +333,8 @@ html.avvio .m-btn{animation:vx-appare .6s ease both 1s}
   background:radial-gradient(130% 380px at 0% 0%,color-mix(in srgb,var(--tinta) 22%,transparent),transparent 70%);transition:--tinta .6s ease}
 .sheet.meta.on{transform:translateY(40%)}
 .sheet.meta .sh-body{padding-bottom:42vh}
+/* nel foglio a metà la mappa grande sopra mostra già il paese: niente mappa piccola, così Visitato / Ci vivo / Vorrei andarci si vedono subito */
+.sheet.meta #mini-box{display:none}
 .sheet.meta .grab{cursor:pointer;width:44px;padding:0;box-sizing:content-box;border-top:8px solid transparent;border-bottom:8px solid transparent;background-clip:padding-box;margin-top:-8px}
 .scrim.trasp{background:transparent;pointer-events:none}
 html.meta .m-top{opacity:0;transform:translateY(-30px);pointer-events:none}
@@ -367,6 +371,10 @@ canvas.festa{position:fixed;inset:0;width:100%;height:100%;z-index:44;pointer-ev
   background:linear-gradient(135deg,#1B2740,#2A1F3D);box-shadow:0 18px 50px rgba(10,15,30,.35),inset 0 0 0 .5px rgba(255,255,255,.15);
   transform:translate(-50%,-150%) scale(.9);opacity:0;transition:transform .6s cubic-bezier(.34,1.3,.64,1),opacity .3s;cursor:pointer}
 .premio.on{transform:translate(-50%,0);opacity:1}
+/* con un foglio intero aperto i premi arrivano dal basso: in alto coprivano la X */
+html.aperto .premio{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);transform:translate(-50%,150%) scale(.9)}
+html.aperto .premio.on{transform:translate(-50%,0)}
+html.aperto.con-premio .toast{top:calc(env(safe-area-inset-top,0px) + 12px)}
 .premio .pe{font-size:34px;width:56px;height:56px;border-radius:18px;display:grid;place-items:center;flex:none;background:rgba(255,255,255,.1)}
 .premio.on .pe{animation:vx-premio .9s cubic-bezier(.34,1.56,.64,1) both .15s}
 @keyframes vx-premio{0%{transform:scale(.3) rotate(-30deg)}60%{transform:scale(1.25) rotate(8deg)}100%{transform:none}}

@@ -216,6 +216,8 @@ function preparaMappa() {
     misura();
     const k = Math.max(1, Math.min(60, scala / M.proj.scale())), xy = M.proj(centro);
     M.sel.call(M.zoom.transform, centro && xy ? d3.zoomIdentity.translate(M.W / 2, M.H / 2).scale(k).translate(-xy[0], -xy[1]) : t);
+    // con il foglio a metà aperto si rifà il volo: il paese torna nella parte libera sopra il foglio
+    const top = pila[pila.length - 1]; if (top && top.meta && tabAttiva === "mappa") modoFoglio(top);
   }, 150); });
 }
 function misura() {
@@ -715,7 +717,8 @@ function disegnaNumeri(entrata) {
     .filter(x => x.d.dal && x.n && (x.d.s === "v" || x.d.s === "l")).sort((a, b) => (b.d.dal || "").localeCompare(a.d.dal || "")).slice(0, 8);
   const ok = new Set(TROFEI.filter(t => t[4](S)).map(t => t[0]));
   // timbri del passaporto: ogni paese visitato, con l'anno del primo viaggio
-  const annoDi = c => { const ds = [dati.paesi[c]?.dal, ...cittaDi(c).map(x => x.dal)].filter(Boolean).sort(); return ds[0] ? ds[0].slice(0, 4) : ""; };
+  const dataVista = x => x && (x.s === "v" || x.s === "l") ? x.dal : null;
+  const annoDi = c => { const ds = [dataVista(dati.paesi[c]), ...cittaDi(c).map(dataVista)].filter(Boolean).sort(); return ds[0] ? ds[0].slice(0, 4) : ""; };
   const timbri = S.vis.map(p => ({ p, s: S.st[p.c], a: annoDi(p.c) })).sort((a, b) => (a.a || "9999").localeCompare(b.a || "9999") || a.p.n.localeCompare(b.p.n, "it"));
   const seme = c => (c.charCodeAt(0) * 31 + c.charCodeAt(1) * 7) % 100;
   const prog = lv.next ? (S.n - lv.min) / (lv.next.n - lv.min) : 1;
@@ -882,6 +885,7 @@ function prossimoPremio() {
   let el = $("#premio");
   if (!el) { el = document.createElement("div"); el.id = "premio"; el.className = "premio"; el.setAttribute("role", "status"); document.body.appendChild(el); el.onclick = () => chiudiPremio(); }
   el.innerHTML = `<span class="pe">${p.e}</span><div><small>${esc(p.k)}</small><b>${esc(p.t)}</b><span>${esc(p.d || "")}</span></div>`;
+  el._p = p;
   el.classList.toggle("grande", !!p.grande);
   el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
   document.documentElement.classList.add("con-premio");
@@ -889,6 +893,11 @@ function prossimoPremio() {
   if (p.grande) coriandoli(0, 0, { pioggia: true, n: 140 });
   else setTimeout(() => { const r = el.getBoundingClientRect(); if (el.classList.contains("on")) coriandoli(r.left + 40, r.top + r.height / 2, { n: 40, forza: 7, apertura: 3 }); }, 380);
   clearTimeout(el._t); el._t = setTimeout(chiudiPremio, p.grande ? 3000 : 2200);
+}
+// il paese è stato tolto subito dopo averlo segnato: via il suo "Nuovo paese" (in coda o già sullo schermo)
+function ritiraPremio(c) {
+  for (let i = coda.length - 1; i >= 0; i--) if (coda[i].paese && coda[i].c === c) coda.splice(i, 1);
+  const el = $("#premio"); if (el && el._p && el._p.paese && el._p.c === c) chiudiPremio();
 }
 function chiudiPremio() {
   const el = $("#premio"); if (!el || !el.classList.contains("on")) return;
@@ -930,8 +939,11 @@ function sostituisciLivello(l) {
 }
 const indietro = () => history.back();
 function chiudiTutto() { if (pila.length) history.go(-(pila.length + (viewerAperto ? 1 : 0))); }
+if (history.state && (history.state.l || history.state.foto)) history.replaceState(null, "");
 window.addEventListener("popstate", () => {
   const st = history.state || {};
+  // "avanti" verso un foglio che non c'è più: la voce si allinea a quello che si vede
+  if ((st.l || 0) > pila.length && !(st.foto && viewerAperto)) { history.replaceState(pila.length ? { l: pila.length } : null, ""); return; }
   if (viewerAperto && !st.foto) { viewerAperto = false; $("#viewer").classList.remove("on"); liberaGrandi(); }
   const l = st.l || 0;
   if (l < pila.length) {
@@ -972,10 +984,11 @@ function tingi(top) {
   $("#sheet").style.setProperty("--tinta", s ? `var(${STATI[s].cv})` : "transparent");
   if (M.pin && top.tipo === "citta") { M.pin.s = s || "w"; richiedi(); }
 }
+let espansoAlle = 0;
 function espandi() {
   const top = pila[pila.length - 1];
   if (!top || !top.meta) return;
-  tocco(); top.meta = false; modoFoglio(top);
+  tocco(); top.meta = false; espansoAlle = Date.now(); modoFoglio(top);
 }
 function mostra(avanti) {
   const top = pila[pila.length - 1];
@@ -993,17 +1006,18 @@ function mostra(avanti) {
     sh.scrollTop = y; top.scroll = y;
   };
   modoFoglio(top);
+  apertoAlle = Date.now();   // a ogni cambio di livello: il secondo tocco di un doppio tocco non chiude il foglio
   if (!giaAperto) {
-    fai(); apertoAlle = Date.now();
+    fai();
     $("#scrim").classList.add("on");
     requestAnimationFrame(() => sh.classList.add("on"));
   } else if (pocoMoto() || !sh.animate) fai();
   else {
     // cambio di livello dentro il foglio: dissolvenza con un piccolo movimento in verticale (mai di lato)
     // durante la dissolvenza il foglio vecchio non si tocca (un doppio tocco aprirebbe due volte la stessa cosa)
-    sh.inert = true;
+    sh._fade = true;
     sh.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "ease-out" }).onfinish = () => {
-      fai(); sh.inert = false;
+      fai(); sh._fade = false;
       sh.animate([{ opacity: 0, transform: `translateY(${avanti ? 10 : -6}px)` }, { opacity: 1, transform: "none" }], { duration: 300, easing: MOLLA });
     };
   }
@@ -1032,6 +1046,9 @@ $("#scrim").onclick = () => {
   chiudiTutto();
 };
 document.addEventListener("keydown", e => { if (e.key === "Escape" && (pila.length || viewerAperto)) history.back(); });
+// durante il cambio di livello, e per un attimo dopo, i tocchi nel foglio non contano (il secondo tocco di un doppio tocco
+// finirebbe sul livello nuovo, magari su "Visitato")
+$("#sheet").addEventListener("click", e => { if ($("#sheet")._fade || Date.now() - apertoAlle < 350) { e.stopPropagation(); e.preventDefault(); } }, true);
 // si ricorda dove eri nel foglio, per tornarci con "indietro"
 $("#sheet").addEventListener("scroll", () => { const top = pila[pila.length - 1]; if (top) top.scroll = $("#sheet").scrollTop; }, { passive: true });
 
@@ -1349,13 +1366,17 @@ async function collegaMvPagina(top) {
 }
 
 const CITTA = new Map();   // paese → { r, c, idx } (caricate quando servono)
-async function caricaCitta(c) {
-  if (CITTA.has(c)) return CITTA.get(c);
-  let d = { r: [], c: [] };
-  try { const r = await fetch(`data/citta/${c}.json?v=${DATI_V}`); if (r.ok) d = await r.json(); } catch (e) { d.errore = true; }
-  d.idx = d.c.map(x => norm(x[1]) + (x[6] ? "|" + norm(x[6]) : ""));
-  if (!d.errore) CITTA.set(c, d);
-  return d;
+const CITTA_IN_ARRIVO = new Map();
+function caricaCitta(c) {
+  if (CITTA.has(c)) return Promise.resolve(CITTA.get(c));
+  if (!CITTA_IN_ARRIVO.has(c)) CITTA_IN_ARRIVO.set(c, (async () => {
+    let d = { r: [], c: [] };
+    try { const r = await fetch(`data/citta/${c}.json?v=${DATI_V}`); if (r.ok) d = await r.json(); } catch (e) { d.errore = true; }
+    d.idx = d.c.map(x => norm(x[1]) + (x[6] ? "|" + norm(x[6]) : ""));
+    if (!d.errore) CITTA.set(c, d);
+    return d;
+  })().finally(() => CITTA_IN_ARRIVO.delete(c)));
+  return CITTA_IN_ARRIVO.get(c);
 }
 function htmlScegli(c) {
   return `${barraFoglio()}<div class="sh-body">
@@ -1367,7 +1388,8 @@ function htmlScegli(c) {
 }
 async function elencoScegli(c) {
   const d = await caricaCitta(c);
-  const box = $("#pick"); if (!box) return;
+  const top = pila[pila.length - 1];
+  const box = $("#pick"); if (!box || !top || top.tipo !== "scegli" || top.c !== c) return;
   const q = norm($("#qc")?.value || "");
   const gia = new Set(cittaDi(c).map(x => x.id));
   let ris = [];
@@ -1456,6 +1478,7 @@ function collegaLuogo(top) {
   // stato: visitato / ci vivo / vorrei andarci
   sh.querySelector(".seg").addEventListener("click", e => {
     const b = e.target.closest("[data-stato]"); if (!b) return;
+    const seg = e.currentTarget; if (Date.now() - (seg._t || 0) < 400) return; seg._t = Date.now();
     tocco();
     const d = rec(), prima = statoPaese(c), primaPct = conti().pct;
     d.s = d.s === b.dataset.stato ? null : b.dataset.stato;
@@ -1480,8 +1503,9 @@ function collegaLuogo(top) {
     const dopo = statoPaese(c);
     if ((dopo === "v" || dopo === "l") && prima !== "v" && prima !== "l") {
       const k = conti();
-      festeggia({ paese: true, e: bandiera(c), k: dopo === "l" ? "Casa tua" : "Nuovo paese", t: P[c].n, d: k.pct > primaPct ? `Ora sei al ${pctTesto(k.pct)} del mondo` : "È sulla tua mappa" });
+      festeggia({ paese: true, c, e: bandiera(c), k: dopo === "l" ? "Casa tua" : "Nuovo paese", t: P[c].n, d: k.pct > primaPct ? `Ora sei al ${pctTesto(k.pct)} del mondo` : "È sulla tua mappa" });
     }
+    if ((prima === "v" || prima === "l") && dopo !== "v" && dopo !== "l") ritiraPremio(c);
     dopoCambio(c, prima);
   });
   collegaViaggio(rec);
@@ -1824,8 +1848,8 @@ function apriFoto(k, id, top) {
     <div class="vbar"><button data-del>Elimina</button></div>`;
   history.pushState({ l: pila.length, foto: 1 }, ""); viewerAperto = true;
   requestAnimationFrame(() => v.classList.add("on"));
-  v.querySelector("[data-x]").onclick = () => history.back();
-  v.onclick = e => { if (e.target === v) history.back(); };
+  v.querySelector("[data-x]").onclick = () => { if (viewerAperto) history.back(); };
+  v.onclick = e => { if (e.target === v && viewerAperto) history.back(); };
   v.querySelector("[data-del]").onclick = async e => {
     const b = e.currentTarget;
     if (!armato(b, "Tocca ancora per eliminare")) return;
@@ -1834,7 +1858,7 @@ function apriFoto(k, id, top) {
     FOTO.set(k, (FOTO.get(k) || []).filter(x => x.id !== id));
     if (!FOTO.get(k).length) FOTO.delete(k);
     if (k.startsWith("p:")) { pulisciVuoto(k.slice(2)); salva(); }
-    history.back();
+    if (viewerAperto) history.back();
     setTimeout(() => { if (pila[pila.length - 1] === top) { top.scroll = $("#sheet").scrollTop; mostra(false); } }, 60);
     toast("Foto eliminata");
   };
@@ -1844,7 +1868,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.9";
+const VERSIONE_APP = "3.0";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
@@ -2168,7 +2192,8 @@ $$(".vista.scorre").forEach(v => {
 document.addEventListener("focusin", e => { if (e.target.closest?.("#sheet.meta") && e.target.matches("input:not([type=date]):not([type=file]),textarea")) espandi(); });
 document.addEventListener("focusin", e => {
   const c = e.target.closest("textarea,input[type=search]"); if (!c) return;
-  setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), 320);
+  // se il foglio si sta allargando (0,55 secondi) si aspetta che sia fermo
+  setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), Date.now() - espansoAlle < 150 ? 650 : 320);
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { leggiColori(); richiedi(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) globoAttivo?.riparti?.(); else { salvaSubito(); if (tStat) { clearTimeout(tStat); tStat = null; inviaStat(); } } });
