@@ -39,7 +39,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,label:focus-visi
 h1,h2,h3{font-family:var(--display);font-weight:800;margin:0;letter-spacing:-.02em;text-wrap:balance}
 
 /* Pagina e schede */
-.app{position:fixed;inset:0;background:var(--bg);transition:transform .5s var(--ios),border-radius .5s var(--ios);--p:1;overflow:hidden}
+.app{position:fixed;inset:0;background:var(--bg);transition:transform .5s var(--ios);--p:1;overflow:hidden;border-radius:22px}
 .vista{position:absolute;inset:0;visibility:hidden;opacity:0}
 .vista.on{visibility:visible;opacity:1}
 .vista.scorre{overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;
@@ -54,15 +54,6 @@ h1{font-size:34px;line-height:1.05;margin-top:3px}
 /* ---------- Mappa ---------- */
 #v-mappa{background:radial-gradient(120% 80% at 50% 45%,var(--ocean) 0%,var(--ocean-2) 100%)}
 .mappa{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:grab}
-.mappa svg{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;display:block}
-.mappa .graticola{fill:none;stroke:var(--ink);stroke-opacity:.06}
-.mappa .sfera{fill:var(--ocean);fill-opacity:.55;stroke:var(--ink);stroke-opacity:.08}
-.mappa path.p{fill:var(--land);stroke:var(--land-line);stroke-width:.6px;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .7s var(--ease)}
-.mappa path.p.s-v{fill:var(--v)} .mappa path.p.s-l{fill:var(--l)} .mappa path.p.s-w{fill:var(--w)}
-.mappa path.p.hl{filter:brightness(1.08)}
-.mappa circle.pt{stroke:var(--land-line);stroke-width:1.2px;vector-effect:non-scaling-stroke;transition:fill .7s var(--ease)}
-.mappa circle.pt.s-v{fill:var(--v)} .mappa circle.pt.s-l{fill:var(--l)} .mappa circle.pt.s-w{fill:var(--w)}
-.mappa circle.onda{fill:none;stroke-width:2px;vector-effect:non-scaling-stroke;pointer-events:none}
 
 .m-top{position:absolute;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top,0px) + 10px) max(12px,env(safe-area-inset-right,0px)) 0 max(12px,env(safe-area-inset-left,0px));pointer-events:none;
   display:flex;flex-direction:column;align-items:center;gap:8px}
@@ -187,7 +178,7 @@ html.aperto .navbar{opacity:0}
 
 /* ---------- Fogli dal basso ---------- */
 html.aperto{background:#000}
-html.aperto .app{transform:translateY(calc(env(safe-area-inset-top,0px) + 8px)) scale(.92);border-radius:22px}
+html.aperto .app{transform:translateY(calc(env(safe-area-inset-top,0px) + 8px)) scale(.92)}
 html.trascina .app{transition:none;transform:translateY(calc((env(safe-area-inset-top,0px) + 8px) * var(--p))) scale(calc(1 - .08 * var(--p)))}
 .scrim{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.28);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .45s var(--ios),visibility 0s .45s}
 .scrim.on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .45s var(--ios)}
@@ -485,7 +476,7 @@ html[data-tab="paesi"] .home-av,html[data-tab="numeri"] .home-av{opacity:0;visib
 .mv-t b{font-size:14.5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mv-t small{font-size:12.5px;color:var(--ink-soft);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mv-ok{position:absolute;top:8px;right:8px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:17px;font-weight:800;color:#fff;
-  background:rgba(10,15,25,.38);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 0 0 1.5px rgba(255,255,255,.7) inset;
+  background:rgba(10,15,25,.5);box-shadow:0 0 0 1.5px rgba(255,255,255,.7) inset;
   transition:background-color .25s,transform .45s var(--spring)}
 .mv-ok:active{transform:scale(.85);transition-duration:.1s}
 .mv-ok[aria-pressed="true"]{background:var(--l);box-shadow:0 4px 12px color-mix(in srgb,var(--l) 45%,transparent)}
@@ -500,3 +491,22 @@ a.btn{text-decoration:none;color:inherit}
 @keyframes vx-attesa{from{opacity:.55}to{opacity:1}}
 .mv{display:flex}
 .mv-apri{flex:1}
+
+/* ===== 2.9: verifica approfondita ===== */
+/* dietro un foglio aperto, sopra e ai lati, nero (come le schede dell'iPhone) */
+html.aperto body{background:#000}
+/* le animazioni d'entrata del foglio solo la prima volta che si apre un livello (tornando indietro o ridisegnando, ferme) */
+.sheet:not(.nuovo) .p-head .flag,.sheet:not(.nuovo) .mini .vic,.sheet:not(.nuovo) .mini .qui,.sheet:not(.nuovo) .mini .cit,
+.sheet:not(.nuovo) .mini .lbl,.sheet:not(.nuovo) .mv,.sheet:not(.nuovo) .album .ph{animation:none}
+.album.fermo .ph:not(.nuova){animation:none}
+/* l'avviso scende sotto il banner dei premi quando c'è */
+html.con-premio .toast{top:calc(env(safe-area-inset-top,0px) + 118px)}
+.btn.mv-altri{height:44px;margin-top:10px;font-size:15px}
+/* timbri: i nomi lunghi vanno su due righe */
+.timbro b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:9.5px;line-height:1.15;text-overflow:clip}
+.timbro.f1{padding:12px}
+/* cartoncino "Home": niente legenda sotto, e sui telefoni bassi la spiegazione più corta */
+html.avviso-home .legenda{opacity:0;pointer-events:none}
+@media (max-height:700px){.home-av .ha-t span{display:none}.ha-passi small{display:none}}
+/* il suggerimento sopra la fila del pulsante del mondo */
+.m-hint{bottom:calc(var(--tab-h) + 76px)}

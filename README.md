@@ -14,7 +14,7 @@ Un'app per segnare sulla mappa del mondo i posti che hai visitato:
 Funziona sull'iPhone come un'app vera: Safari → Condividi → **Aggiungi alla schermata Home**. Si apre anche senza internet.
 
 ## I dati
-Paesi, città e foto restano **solo sul telefono** (niente account, niente server). Nelle Impostazioni (rotellina in Numeri) c'è **Salva una copia**, da tenere per esempio su iCloud Drive.
+Città, date, foto e note restano **solo sul telefono** (niente account); al server delle statistiche va solo un riepilogo anonimo (vedi sotto). Nelle Impostazioni (rotellina in Numeri) c'è **Salva una copia**, da tenere per esempio su iCloud Drive.
 Su iPhone l'app sulla schermata Home ha un archivio suo, separato da Safari: chi ha già segnato dei viaggi in Safari salva una copia e la ripristina nell'app (il cartoncino "Mettila sulla schermata Home" lo spiega).
 
 ## Statistiche anonime

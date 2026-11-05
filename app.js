@@ -4,6 +4,8 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// versione dei file in data/: se cambiano, alzarla anche in sw.js (DATI)
+const DATI_V = "d3";
 const nuovoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pocoMoto = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const MOLLA = "cubic-bezier(.32,.72,0,1)";
@@ -49,21 +51,34 @@ const DB = {
         d.createObjectStore("stato");
         d.createObjectStore("foto", { keyPath: "id" }).createIndex("k", "k");
       };
-      r.onsuccess = () => { this.db = r.result; ok(); };
+      r.onsuccess = () => {
+        const d = this.db = r.result; this.aperto = true;
+        d.onclose = () => { if (this.db === d) this.db = null; };
+        d.onversionchange = () => { d.close(); if (this.db === d) this.db = null; };
+        ok();
+      };
       r.onerror = () => ko(r.error);
     });
   },
+  aperto: false,
+  // connessione persa: si riapre (solo se all'avvio si era aperto davvero: in una finestra privata no)
+  riapri() { if (!this.aperto) return Promise.reject(new Error("niente archivio")); this.db = null; return this.open(); },
+  persa: e => !!e && /InvalidState|UnknownError|closing|connection/i.test((e.name || "") + " " + (e.message || "")),
   // true se all'avvio i dati salvati non si sono letti: allora non si scrive più niente (si cancellerebbero)
   bloccato: false,
-  tx(store, mode, fn) {
+  tx(store, mode, fn, riprova = true) {
+    const di_nuovo = () => this.riapri().then(() => this.tx(store, mode, fn, false));
     return new Promise((ok, ko) => {
-      if (!this.db) { ko(new Error("niente archivio")); return; }
       if (mode === "readwrite" && this.bloccato) { ko(new Error("bloccato")); return; }
-      const t = this.db.transaction(store, mode);
+      if (!this.db) { if (riprova && this.aperto) di_nuovo().then(ok, ko); else ko(new Error("niente archivio")); return; }
+      let t;
+      try { t = this.db.transaction(store, mode); }
+      catch (e) { if (riprova && this.persa(e)) di_nuovo().then(ok, ko); else ko(e); return; }
       const req = fn(t.objectStore(store));
       t.oncomplete = () => ok(req && req.result);
-      t.onerror = () => ko(t.error);
-      t.onabort = () => ko(t.error);
+      const male = () => { if (riprova && this.persa(t.error)) di_nuovo().then(ok, ko); else ko(t.error); };
+      t.onerror = () => {};   // si decide in onabort, che arriva sempre dopo (anche per lo spazio pieno: resta un errore)
+      t.onabort = male;
     });
   },
   get: (s, k) => DB.tx(s, "readonly", st => st.get(k)),
@@ -71,10 +86,13 @@ const DB = {
   put: (s, v, k) => DB.tx(s, "readwrite", st => k === undefined ? st.put(v) : st.put(v, k)),
   del: (s, k) => DB.tx(s, "readwrite", st => st.delete(k)),
   // ripristino: tutto in un colpo, o non cambia niente
-  sostituisci(dati, foto) {
+  sostituisci(dati, foto, riprova = true) {
     return new Promise((ok, ko) => {
-      if (!this.db || this.bloccato) { ko(new Error("bloccato")); return; }
-      const t = this.db.transaction(["stato", "foto"], "readwrite");
+      if (this.bloccato) { ko(new Error("bloccato")); return; }
+      if (!this.db) { if (riprova && this.aperto) this.riapri().then(() => this.sostituisci(dati, foto, false)).then(ok, ko); else ko(new Error("niente archivio")); return; }
+      let t;
+      try { t = this.db.transaction(["stato", "foto"], "readwrite"); }
+      catch (e) { if (riprova && this.persa(e)) this.riapri().then(() => this.sostituisci(dati, foto, false)).then(ok, ko); else ko(e); return; }
       try { t.objectStore("stato").put(dati, "dati"); const sf = t.objectStore("foto"); sf.clear(); foto.forEach(f => sf.put(f)); }
       catch (e) { t.abort(); ko(e); return; }
       t.oncomplete = () => ok(); t.onerror = () => ko(t.error); t.onabort = () => ko(t.error);
@@ -117,7 +135,7 @@ function conti() {
   const onu = vis.filter(p => p.o);
   const tot = PAESI.filter(p => p.o).length || 195;
   const areaTot = PAESI.filter(p => p.k !== "an").reduce((a, p) => a + p.a, 0);
-  return { st, vis, onu, tot, pct: onu.length / tot, area: vis.reduce((a, p) => a + p.a, 0) / areaTot,
+  return { st, vis, onu, tot, pct: onu.length / tot, area: vis.filter(p => p.k !== "an").reduce((a, p) => a + p.a, 0) / areaTot,
     w: PAESI.filter(p => st[p.c] === "w").length, l: PAESI.filter(p => st[p.c] === "l").length };
 }
 // sotto il 10% con un decimale (2,6%), poi intero
@@ -172,7 +190,13 @@ function preparaMappa() {
   M.sel = d3.select(cv).call(M.zoom);
   M.sel.on("dblclick.zoom", null);
   cv.addEventListener("click", tocca);
-  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const t = M.t; misura(); M.sel.call(M.zoom.transform, t); }, 150); });
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => {
+    // il punto del mondo al centro dello schermo e la grandezza restano gli stessi dopo la rotazione
+    const t = M.t, centro = M.proj.invert(t.invert([M.W / 2, M.H / 2])), scala = t.k * M.proj.scale();
+    misura();
+    const k = Math.max(1, Math.min(60, scala / M.proj.scale())), xy = M.proj(centro);
+    M.sel.call(M.zoom.transform, centro && xy ? d3.zoomIdentity.translate(M.W / 2, M.H / 2).scale(k).translate(-xy[0], -xy[1]) : t);
+  }, 150); });
 }
 function misura() {
   const box = $("#mappa"), W = box.clientWidth, H = box.clientHeight, dpr = Math.min(3, devicePixelRatio || 1);
@@ -299,8 +323,9 @@ function disegna(now) {
   // i posti da non perdere del paese aperto: puntini bianchi (verdi se già visti)
   if (M.stelle && M.scelto) for (const st of M.stelle) {
     const [px, py] = M.proj([st.ll[1], st.ll[0]]);
-    ctx.beginPath(); ctx.arc(px, py, 4.2 / t.k, 0, 7); ctx.fillStyle = visto(st.q) ? COL.l : "#fff"; ctx.fill();
-    ctx.lineWidth = 1.6 / t.k; ctx.strokeStyle = COL.w; ctx.stroke();
+    const v = visto(st.q);
+    ctx.beginPath(); ctx.arc(px, py, 4.2 / t.k, 0, 7); ctx.fillStyle = v ? COL.l : "#fff"; ctx.fill();
+    ctx.lineWidth = (v ? 2 : 1.6) / t.k; ctx.strokeStyle = v ? "#fff" : COL.w; ctx.stroke();
   }
   // la città aperta: un segnaposto sulla mappa grande
   if (M.pin) {
@@ -310,7 +335,8 @@ function disegna(now) {
     ctx.lineWidth = 1 / t.k; ctx.strokeStyle = "rgba(0,0,0,.25)"; ctx.beginPath(); ctx.arc(px, py, 8 / t.k, 0, 7); ctx.stroke();
   }
   // nomi dei paesi quando si ingrandisce
-  if (t.k >= 2.2 && !M.intro) {
+  if (t.k >= 2.2 && (!M.intro || ip > .75)) {
+    const entrataNomi = M.intro ? chiaro(ip, .75, 1) : 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = "600 11.5px -apple-system, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
@@ -325,9 +351,10 @@ function disegna(now) {
       const x = m.lbl[0] * t.k + t.x, y = m.lbl[1] * t.k + t.y;
       if (x < -50 || x > W + 50 || y < 0 || y > H) continue;
       const s = st[f.c];
-      ctx.globalAlpha = Math.min(1, (t.k - 2.2) * 2) * (s ? .95 : .55);
-      ctx.fillStyle = s ? "#fff" : COL.ink;
-      if (s) { ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.18)"; ctx.strokeText(nome, x, y); }
+      ctx.globalAlpha = entrataNomi * Math.min(1, (t.k - 2.2) * 2) * (s ? 1 : .55);
+      // sul giallo ("vorrei andarci") testo scuro; su corallo e verde testo bianco con un alone deciso
+      ctx.fillStyle = s === "w" ? "#2E2200" : s ? "#fff" : COL.ink;
+      if (s) { ctx.lineWidth = 3.5; ctx.strokeStyle = s === "w" ? "rgba(255,255,255,.45)" : "rgba(0,0,0,.45)"; ctx.strokeText(nome, x, y); }
       ctx.fillText(nome, x, y);
     }
     ctx.globalAlpha = 1;
@@ -384,10 +411,11 @@ function tocca(e) {
     for (const f of cand) if (ctx.isPointInPath(f.p, px, py)) { hit = f.c; break; }
     ctx.restore();
   }
-  if (!hit || !P[hit]) return;
+  if (!hit || !P[hit] || pila.length || inApertura) return;   // foglio già aperto o in apertura (doppio tocco)
   tocco();
   M.flash = { c: hit, t0: performance.now() }; richiedi();
-  setTimeout(() => apriLivello({ tipo: "paese", c: hit, meta: true }), 90);
+  inApertura = true;
+  setTimeout(() => { if (inApertura) apriLivello({ tipo: "paese", c: hit, meta: true }); }, 90);
 }
 // limiti del trascinamento: più larghi quando si vola su un paese (Cile, Sudafrica… finirebbero sotto il foglio)
 const limiti = largo => largo ? [[-M.W, -M.H], [M.W * 2, M.H * 2]] : [[-M.W * .3, -M.H * .1], [M.W * 1.3, M.H * 1.1]];
@@ -540,7 +568,7 @@ function elencoPaesi(entrata) {
 }
 function rigaPaese(p, s, nc) {
   const d = dati.paesi[p.c] || {};
-  const sub = [nc ? (nc === 1 ? "1 città" : `${nc} città`) : "", fmtPeriodo(d.dal, d.al)].filter(Boolean).join(" · ");
+  const sub = [nc ? (nc === 1 ? "1 città" : `${nc} città`) : "", d.s === "v" || d.s === "l" ? fmtPeriodo(d.dal, d.al) : ""].filter(Boolean).join(" · ");
   return `<button class="riga" data-paese="${p.c}"><span class="flag">${bandiera(p.c)}</span><span class="nm"><b>${esc(p.n)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span>
     ${s ? `<span class="pill ${s}" style="--c:var(${STATI[s].cf})">${STATI[s].t}</span>` : ICO.vai}</button>`;
 }
@@ -634,7 +662,7 @@ function disegnaNumeri(entrata) {
     <section class="hero${ent}">
       <div class="ring-wrap"><svg class="big-ring" viewBox="0 0 120 120" aria-hidden="true">
         <defs><linearGradient id="g-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--w)"/><stop offset="1" style="stop-color:var(--v)"/></linearGradient></defs>
-        <circle class="bg" cx="60" cy="60" r="54"/><circle class="fg" id="n-ring" cx="60" cy="60" r="54" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
+        <circle class="bg" cx="60" cy="60" r="54"/><circle class="fg" id="n-ring" cx="60" cy="60" r="54" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${entrata ? 100 : 100 - Math.max(S.pct > 0 ? 2 : 0, S.pct * 100)}"/></svg>
         <canvas id="globo" aria-label="Il mondo con i paesi visitati: trascina per girarlo"></canvas></div>
       <div class="hero-t"><b class="pct" id="n-pct">0%</b><h2>del mondo visitato</h2>
         <p>${S.n === 1 ? "1 paese" : S.n + " paesi"} su ${S.tot}${S.nCont ? ` · ${S.nCont === 1 ? "1 continente" : S.nCont + " continenti"}` : ""}</p>
@@ -643,7 +671,7 @@ function disegnaNumeri(entrata) {
     <section class="liv${ent}" style="--i:1">
       <span class="liv-e">${lv.e}</span>
       <div class="liv-t"><small>Livello ${lv.i + 1}</small><b>${lv.t}</b>
-        <div class="barra oro"><i style="--f:0" data-f="${prog}"></i></div>
+        <div class="barra oro"><i style="--f:${entrata ? 0 : prog}" data-f="${prog}"></i></div>
         <span>${lv.next ? `Ancora ${lv.next.n - S.n === 1 ? "1 paese" : lv.next.n - S.n + " paesi"} per il livello «${lv.next.t}» ${lv.next.e}` : "Hai raggiunto il livello più alto"}</span></div>
     </section>
     <div class="tiles">
@@ -660,9 +688,9 @@ function disegnaNumeri(entrata) {
     <div class="trofei">${TROFEI.map((t, i) => `<div class="trofeo${ok.has(t[0]) ? " ok" : ""}${entrata ? " entra" : ""}" style="--i:${Math.min(i, 10)}"><span class="te">${ok.has(t[0]) ? t[1] : "🔒"}</span><b>${t[2]}</b><small>${t[3]}</small></div>`).join("")}</div>
     <div class="sez-h">Continenti</div>
     <div class="cont-st">${S.cont.map(x => `<div class="r"><div><span class="ce">${EMOJI_CONT[x.c]}</span>${CONT[x.c]}<span>${x.f} di ${x.n}</span></div>
-      <div class="barra"><i style="--f:0" data-f="${x.f / x.n}"></i></div></div>`).join("")}</div>
+      <div class="barra"><i style="--f:${entrata ? 0 : x.f / x.n}" data-f="${x.f / x.n}"></i></div></div>`).join("")}</div>
     ${mzL.length ? `<div class="sez-h">Come viaggi</div><div class="cont-st mezzi-st" style="padding:14px 16px">${mzL.map(([m, n]) => `<div class="mz"><span class="e">${MZ[m][1]}</span>
-      <div>${MZ[m][2]}<div class="barra"><i style="--f:0" data-f="${n / mzMax}"></i></div></div><span>${n}</span></div>`).join("")}</div>` : ""}
+      <div>${MZ[m][2]}<div class="barra"><i style="--f:${entrata ? 0 : n / mzMax}" data-f="${n / mzMax}"></i></div></div><span>${n}</span></div>`).join("")}</div>` : ""}
     ${ultimi.length ? `<div class="sez-h">Ultimi viaggi</div><div class="viaggi">${ultimi.map(x => {
       const f = (FOTO.get(x.tipo === "paese" ? keyPaese(x.c) : keyCitta(x.d.id)) || [])[0];
       return `<button class="vg" ${x.tipo === "paese" ? `data-paese="${x.c}"` : `data-citta="${esc(x.d.id)}"`}><span class="ic">${f ? `<img src="${esc(f.mini)}" alt="">` : bandiera(x.c)}</span>
@@ -683,10 +711,10 @@ const EMOJI_CONT = { eu: "🏰", as: "🏯", af: "🦁", na: "🗽", sa: "🦜",
 const tile = (e, n, t, i, entrata) => `<div class="tile${entrata ? " entra" : ""}" style="--i:${i}"><span class="e">${e}</span><b data-n="${n}">${n.toLocaleString("it-IT")}</b><span>${t}</span></div>`;
 
 /* Il globo che gira (Numeri): Natural Earth 1:110m, si trascina col dito */
-let GLOBO = null;   // forme del globo (1:110m)
+let GLOBO = null, GIRO_GLOBO = null;   // GIRO_GLOBO: dove era girato il globo (ridisegnando la pagina resta lì)   // forme del globo (1:110m)
 async function avviaGlobo(st) {
   const cv = $("#globo"); if (!cv) return;
-  if (!GLOBO) { try { const t = await (await fetch("data/globo.json")).json(); GLOBO = topojson.feature(t, t.objects.countries).features; } catch (e) { return; } }
+  if (!GLOBO) { try { const t = await (await fetch(`data/globo.json?v=${DATI_V}`)).json(); GLOBO = topojson.feature(t, t.objects.countries).features; } catch (e) { return; } }
   if (!cv.isConnected) return;
   const size = 104, dpr = Math.min(3, devicePixelRatio || 1);
   cv.width = cv.height = size * dpr; cv.style.width = cv.style.height = size + "px";
@@ -696,7 +724,7 @@ async function avviaGlobo(st) {
   // si parte con i paesi visitati davanti
   const vis = GLOBO.filter(f => st[f.properties.c] === "v" || st[f.properties.c] === "l");
   const ce = vis.length ? d3.geoCentroid({ type: "FeatureCollection", features: vis }) : [12, 42];
-  const g = globoAttivo = { cv, rot: [-ce[0] + 25, -Math.max(-35, Math.min(35, ce[1])) * .7], vel: pocoMoto() ? 0 : .012, drag: null, raf: 0, last: 0 };
+  const g = globoAttivo = { cv, rot: GIRO_GLOBO || [-ce[0] + 25, -Math.max(-35, Math.min(35, ce[1])) * .7], vel: pocoMoto() ? 0 : .012, drag: null, raf: 0, last: 0 };
   const grat = d3.geoGraticule10();
   const disegnaG = () => {
     proj.rotate(g.rot);
@@ -712,13 +740,16 @@ async function avviaGlobo(st) {
   };
   const giro = now => {
     g.raf = 0;
-    if (globoAttivo !== g || !cv.isConnected || tabAttiva !== "numeri" || document.hidden || pila.length) { disegnaG(); return; }
+    if (globoAttivo !== g || !cv.isConnected || tabAttiva !== "numeri" || document.hidden || pila.length || !g.visibile) { disegnaG(); return; }
     const dt = Math.min(50, now - (g.last || now)); g.last = now;
     if (!g.drag) g.rot[0] += g.vel * dt;
     disegnaG();
     if (g.vel || g.drag) g.raf = requestAnimationFrame(giro);
   };
-  g.riparti = () => { if (!g.raf) { g.last = 0; g.raf = requestAnimationFrame(giro); } };
+  GIRO_GLOBO = g.rot;
+  g.visibile = true;
+  g.riparti = () => { if (!g.raf && g.visibile) { g.last = 0; g.raf = requestAnimationFrame(giro); } };
+  if ("IntersectionObserver" in window) new IntersectionObserver(es => { g.visibile = es[0].isIntersecting; if (g.visibile) g.riparti(); }).observe(cv);
   cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId); g.drag = { x: e.clientX, y: e.clientY, r: [...g.rot] }; g.riparti(); };
   cv.onpointermove = e => { if (!g.drag) return; g.rot[0] = g.drag.r[0] + (e.clientX - g.drag.x) * .7; g.rot[1] = Math.max(-60, Math.min(60, g.drag.r[1] - (e.clientY - g.drag.y) * .7)); };
   cv.onpointerup = cv.onpointercancel = () => { g.drag = null; };
@@ -782,13 +813,14 @@ function festeggia(p) {
 }
 function prossimoPremio() {
   const p = coda.shift();
-  if (!p) { premioOn = false; return; }
+  if (!p) { premioOn = false; document.documentElement.classList.remove("con-premio"); return; }
   premioOn = true;
   let el = $("#premio");
   if (!el) { el = document.createElement("div"); el.id = "premio"; el.className = "premio"; el.setAttribute("role", "status"); document.body.appendChild(el); el.onclick = () => chiudiPremio(); }
   el.innerHTML = `<span class="pe">${p.e}</span><div><small>${esc(p.k)}</small><b>${esc(p.t)}</b><span>${esc(p.d || "")}</span></div>`;
   el.classList.toggle("grande", !!p.grande);
   el.classList.remove("on"); void el.offsetWidth; el.classList.add("on");
+  document.documentElement.classList.add("con-premio");
   tocco();
   if (p.grande) coriandoli(0, 0, { pioggia: true, n: 140 });
   else setTimeout(() => { const r = el.getBoundingClientRect(); if (el.classList.contains("on")) coriandoli(r.left + 40, r.top + r.height / 2, { n: 40, forza: 7, apertura: 3 }); }, 380);
@@ -797,7 +829,7 @@ function prossimoPremio() {
 function chiudiPremio() {
   const el = $("#premio"); if (!el || !el.classList.contains("on")) return;
   clearTimeout(el._t); el.classList.remove("on");
-  setTimeout(prossimoPremio, 420);
+  setTimeout(() => { if (!coda.length) document.documentElement.classList.remove("con-premio"); prossimoPremio(); }, 420);
 }
 
 /* =====================================================================
@@ -806,7 +838,23 @@ function chiudiPremio() {
    ===================================================================== */
 const pila = [];
 let viewerAperto = false;
+/* Conferma in due tocchi: il secondo vale solo dopo 0,6 secondi (un doppio tocco per sbaglio non cancella niente)
+   e entro 5 secondi; poi il pulsante torna com'era. */
+function armato(b, testo) {
+  const ora = Date.now();
+  if (b._armato && ora - b._armato < 600) return false;
+  if (b._armato && ora - b._armato < 5000) { clearTimeout(b._t); b._armato = 0; return true; }
+  b._armato = ora; if (!b._testo) b._testo = b.textContent;
+  b.classList.add("sicuro"); b.textContent = testo; tocco();
+  clearTimeout(b._t); b._t = setTimeout(() => { b._armato = 0; b.classList.remove("sicuro"); b.textContent = b._testo; }, 5000);
+  return false;
+}
+let apertoAlle = 0, inApertura = false;
 function apriLivello(l) {
+  // lo stesso livello due volte di fila (doppio tocco): niente
+  const top = pila[pila.length - 1];
+  if (top && top.tipo === l.tipo && top.c === l.c && top.id === l.id && top.q === l.q) return;
+  inApertura = false;
   pila.push(l);
   history.pushState({ l: pila.length }, "");
   mostra(true);
@@ -867,6 +915,7 @@ function mostra(avanti) {
   if (html == null) { indietro(); return; }
   const fai = () => {
     const y = top.scroll || 0;
+    sh.classList.toggle("nuovo", !top._visto); top._visto = true;
     sh.innerHTML = `<div class="grab" data-grab></div>` + html;
     sh.scrollTop = y;
     collega(top);
@@ -875,14 +924,16 @@ function mostra(avanti) {
   };
   modoFoglio(top);
   if (!giaAperto) {
-    fai();
+    fai(); apertoAlle = Date.now();
     $("#scrim").classList.add("on");
     requestAnimationFrame(() => sh.classList.add("on"));
   } else if (pocoMoto() || !sh.animate) fai();
   else {
     // cambio di livello dentro il foglio: dissolvenza con un piccolo movimento in verticale (mai di lato)
+    // durante la dissolvenza il foglio vecchio non si tocca (un doppio tocco aprirebbe due volte la stessa cosa)
+    sh.inert = true;
     sh.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "ease-out" }).onfinish = () => {
-      fai();
+      fai(); sh.inert = false;
       sh.animate([{ opacity: 0, transform: `translateY(${avanti ? 10 : -6}px)` }, { opacity: 1, transform: "none" }], { duration: 300, easing: MOLLA });
     };
   }
@@ -904,6 +955,7 @@ let ultimoCampo = 0;
 document.addEventListener("change", e => { if (e.target.matches?.("input,textarea,select")) ultimoCampo = Date.now(); }, true);
 document.addEventListener("focusout", e => { if (e.target.matches?.("input,textarea,select")) ultimoCampo = Date.now(); }, true);
 $("#scrim").onclick = () => {
+  if (Date.now() - apertoAlle < 450) return;   // il secondo tocco di un doppio tocco sulla mappa
   const a = document.activeElement;
   if (a && a.matches("input,textarea,select")) { a.blur(); return; }
   if (Date.now() - ultimoCampo < 700) return;
@@ -1016,7 +1068,7 @@ function htmlPaese(c) {
     <div id="viaggio">${htmlViaggio(d)}</div>
     <div class="blk-h">Città <small>${cs.length ? cs.length + (cs.length === 1 ? " città" : " città") : ""}</small></div>
     <div class="card citta">
-      ${cs.map(x => `<button class="riga" data-citta="${esc(x.id)}"><span class="dot" style="--c:var(${STATI[x.s || "w"].cv})"></span>
+      ${cs.map(x => `<button class="riga" data-citta="${esc(x.id)}"><span class="dot" style="--c:var(${x.s ? STATI[x.s].cv : "--line"})"></span>
         <span class="nm"><b>${esc(x.n)}</b><small>${esc([x.s ? STATI[x.s].t : "", fmtPeriodo(x.dal, x.al), (x.mezzi || []).map(m => MZ[m]?.[1]).join("")].filter(Boolean).join(" · "))}</small></span>${ICO.vai}</button>`).join("")}
       <button class="add-row" data-aggiungi>${ICO.piu}Aggiungi una città</button>
     </div>
@@ -1051,7 +1103,7 @@ function htmlCitta(id) {
 const CONSIGLI = new Map(), IN_ARRIVO = new Map();
 function caricaConsigli(c) {
   if (CONSIGLI.has(c)) return Promise.resolve(CONSIGLI.get(c));
-  if (!IN_ARRIVO.has(c)) IN_ARRIVO.set(c, fetch(`data/consigli/${c}.json`).then(r => r.ok ? r.json() : []).then(d => { CONSIGLI.set(c, Array.isArray(d) ? d : []); return CONSIGLI.get(c); })
+  if (!IN_ARRIVO.has(c)) IN_ARRIVO.set(c, fetch(`data/consigli/${c}.json?v=${DATI_V}`).then(r => r.ok ? r.json() : []).then(d => { CONSIGLI.set(c, Array.isArray(d) ? d : []); return CONSIGLI.get(c); })
     .catch(() => null).finally(() => IN_ARRIVO.delete(c)));   // senza rete: null, si riprova la prossima volta
   return IN_ARRIVO.get(c);
 }
@@ -1074,7 +1126,8 @@ function vari(righe, quanti) {
   // montagne e acque distribuite: al massimo una ogni 4 posti (le altre aspettano il loro turno)
   const out = [], per = {}, attesa = [];
   const nat = t => t === "montagna" || t === "acqua";
-  const puo = r => (per[r[9]] || 0) >= (r[9] === "torre" ? 2 : 3) ? false : nat(r[9]) && (per.natura || 0) >= Math.min(3, Math.floor(out.length / 4) + 1) ? "dopo" : true;
+  let fine = false;
+  const puo = r => (per[r[9]] || 0) >= (r[9] === "torre" ? 2 : 3) ? false : nat(r[9]) && (per.natura || 0) >= (fine ? 3 : Math.min(3, Math.floor(out.length / 4) + 1)) ? "dopo" : true;
   const metti = r => { per[r[9]] = (per[r[9]] || 0) + 1; if (nat(r[9])) per.natura = (per.natura || 0) + 1; out.push(r); };
   const recupera = () => { for (let i = 0; i < attesa.length && out.length < quanti; i++) if (puo(attesa[i]) === true) { metti(attesa.splice(i, 1)[0]); i = -1; } };
   for (const r of righe) {
@@ -1083,7 +1136,7 @@ function vari(righe, quanti) {
     const p = puo(r);
     if (p === true) metti(r); else if (p === "dopo") attesa.push(r);
   }
-  recupera();
+  fine = true; recupera();
   return out;
 }
 function sceltaConsigli(righe, top) {
@@ -1113,7 +1166,7 @@ function disegnaConsigli(box, top, c, righe) {
   box.innerHTML = `<div class="blk-h">Da non perdere${nome ? " a " + esc(nome) : ""} <small id="mv-n">${contaVisti(lista)}</small></div>
     <p class="piccolo mv-intro">${introMv((top.tipo === "citta" ? dati.citta[top.id].s : (dati.paesi[c] || {}).s) || s)}</p>
     <div class="mv-grid">${lista.slice(0, quanti).map((r, i) => cartaMv(r, i)).join("")}</div>
-    ${lista.length > quanti ? `<button class="allbtn" id="mv-altri">Mostra altri ${lista.length - quanti}</button>` : ""}`;
+    ${lista.length > quanti ? `<button class="btn ghost mv-altri" id="mv-altri">Mostra altri ${lista.length - quanti}</button>` : ""}`;
   collegaMv(box, top);
 }
 const introMv = s => s === "w" ? "Per quando ci andrai. Segna ✓ quelli che vedi." : s ? "Segna ✓ quelli che hai visto." : "I più famosi, secondo Wikipedia.";
@@ -1121,16 +1174,24 @@ const contaVisti = l => { const n = l.filter(r => visto(r[0])).length; return n 
 function cartaMv(r, i) {
   const [e] = tipoMv(r[9]);
   return `<div class="mv" style="--i:${Math.min(i, 8)}">
-    <button class="mv-apri" data-mv="${esc(r[0])}"><span class="mv-img" data-e="${e}">${fotoWiki(r[5], 330) ? `<img src="${esc(fotoWiki(r[5], 330))}" alt="" loading="lazy" decoding="async" crossorigin="anonymous">` : ""}</span>
+    <button class="mv-apri" data-mv="${esc(r[0])}"><span class="mv-img" data-e="${e}">${fotoWiki(r[5], 500) ? `<img src="${esc(fotoWiki(r[5], 500))}" alt="" loading="lazy" decoding="async" crossorigin="anonymous">` : ""}</span>
       <span class="mv-t"><b>${esc(r[1])}</b><small>${esc(r[2] || tipoMv(r[9])[1])}</small></span></button>
     <button class="mv-ok" data-visto="${esc(r[0])}" aria-pressed="${visto(r[0])}" aria-label="Visto: ${esc(r[1])}">✓</button></div>`;
 }
 // foto: dissolvenza quando arriva, emoji del tipo se non c'è o non si carica
+// se la miniatura grande non c'è (foto originale piccola), si prova la misura standard più piccola
+const MISURE = [1280, 960, 500, 330];
+function misuraSotto(im) {
+  const m = im.src.match(/\/(?:lossy-page1-)?(\d+)px-/), i = m ? MISURE.indexOf(+m[1]) : -1;
+  if (i < 0 || i === MISURE.length - 1) return false;
+  im.src = im.src.replace(`/${m[0].slice(1)}`, `/${m[0].slice(1).replace(m[1] + "px-", MISURE[i + 1] + "px-")}`);
+  return true;
+}
 function legaFoto(el) {
   el.querySelectorAll(".mv-img img:not([data-l])").forEach(im => {
     im.dataset.l = 1;
-    const ok = () => im.classList.add("ok"), ko = () => im.remove();
-    if (im.complete && im.naturalWidth) ok(); else { im.addEventListener("load", ok, { once: true }); im.addEventListener("error", ko, { once: true }); }
+    const ok = () => im.classList.add("ok"), ko = () => { if (!misuraSotto(im)) im.remove(); };
+    if (im.complete && im.naturalWidth) ok(); else { im.addEventListener("load", ok); im.addEventListener("error", ko); }
   });
 }
 function collegaMv(box, top) {
@@ -1173,7 +1234,7 @@ function htmlMv(top) {
   const mappe = suIOS() ? `https://maps.apple.com/?ll=${r[3]},${r[4]}&q=${encodeURIComponent(r[1])}` : `https://www.google.com/maps/search/?api=1&query=${r[3]},${r[4]}`;
   const wiki = r[6] ? `https://it.wikipedia.org/wiki/${encodeURIComponent(r[6].replace(/ /g, "_"))}` : r[7] ? `https://en.wikipedia.org/wiki/${encodeURIComponent(r[7].replace(/ /g, "_"))}` : "";
   return `${barraFoglio()}<div class="sh-body">
-    <div class="mv-hero" data-e="${e}">${fotoWiki(r[5], 960) ? `<img src="${esc(fotoWiki(r[5], 960))}" alt="" crossorigin="anonymous">` : ""}</div>
+    <div class="mv-hero" data-e="${e}">${fotoWiki(r[5], 1280) ? `<img src="${esc(fotoWiki(r[5], 1280))}" alt="" crossorigin="anonymous">` : ""}</div>
     <div class="kicker" style="margin-top:14px">${e} ${t} · ${bandiera(top.c)} ${esc(P[top.c]?.n || "")}</div>
     <h2 class="mv-h">${esc(r[1])}</h2>
     ${r[2] ? `<p class="mv-desc">${esc(r[2])}</p>` : ""}
@@ -1187,7 +1248,7 @@ const RIASSUNTI = new Map();
 async function collegaMvPagina(top) {
   const r = (CONSIGLI.get(top.c) || []).find(x => x[0] === top.q); if (!r) return;
   const hero = $(".mv-hero img");
-  if (hero) { const ok = () => hero.classList.add("ok"); if (hero.complete && hero.naturalWidth) ok(); else { hero.addEventListener("load", ok, { once: true }); hero.addEventListener("error", () => hero.remove(), { once: true }); } }
+  if (hero) { const ok = () => hero.classList.add("ok"); if (hero.complete && hero.naturalWidth) ok(); else { hero.addEventListener("load", ok); hero.addEventListener("error", () => { if (!misuraSotto(hero)) hero.remove(); }); } }
   $("#mv-visto").addEventListener("click", e => {
     const b = e.currentTarget; segnaVisto(r[0], b, null);
     b.className = "btn " + (visto(r[0]) ? "pieno" : "ghost"); b.textContent = visto(r[0]) ? "✓ L'hai visto" : "L'ho visto";
@@ -1217,7 +1278,7 @@ const CITTA = new Map();   // paese → { r, c, idx } (caricate quando servono)
 async function caricaCitta(c) {
   if (CITTA.has(c)) return CITTA.get(c);
   let d = { r: [], c: [] };
-  try { const r = await fetch(`data/citta/${c}.json`); if (r.ok) d = await r.json(); } catch (e) { d.errore = true; }
+  try { const r = await fetch(`data/citta/${c}.json?v=${DATI_V}`); if (r.ok) d = await r.json(); } catch (e) { d.errore = true; }
   d.idx = d.c.map(x => norm(x[1]) + (x[6] ? "|" + norm(x[6]) : ""));
   if (!d.errore) CITTA.set(c, d);
   return d;
@@ -1324,6 +1385,7 @@ function collegaLuogo(top) {
     tocco();
     const d = rec(), prima = statoPaese(c), primaPct = conti().pct;
     d.s = d.s === b.dataset.stato ? null : b.dataset.stato;
+    sistemaData(d);
     if (paese) pulisciVuoto(c);
     salva(true);
     $$(".seg [data-stato]").forEach(x => x.setAttribute("aria-pressed", x.dataset.stato === (d.s || "")));
@@ -1362,11 +1424,11 @@ function collegaLuogo(top) {
   } else {
     $("#b-togli").addEventListener("click", async e => {
       const b = e.currentTarget;
-      if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora per togliere"; tocco(); return; }
+      if (!armato(b, "Tocca ancora per togliere")) return;
       const prima = statoPaese(c);
       if (DB.bloccato) { avvisoLettura(); return; }
       try { for (const f of [...(FOTO.get(kFoto) || [])]) { await DB.del("foto", f.id); FOTO.set(kFoto, FOTO.get(kFoto).filter(x => x !== f)); } }
-      catch (er) { toast("Non riesco a togliere le foto della città: riprova"); b.classList.remove("sicuro"); b.textContent = "Togli questa città"; return; }
+      catch (er) { toast("Non riesco a togliere le foto della città: riprova"); b.classList.remove("sicuro"); b.textContent = b._testo || "Togli questa città"; return; }
       FOTO.delete(kFoto);
       delete dati.citta[top.id]; salva(true);
       dopoCambio(c, prima);
@@ -1473,7 +1535,7 @@ function collegaImp() {
   $("#b-file").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) chiediRipristino(f); });
   $("#b-canc").addEventListener("click", async e => {
     const b = e.currentTarget;
-    if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora: cancella paesi, città e foto"; tocco(); return; }
+    if (!armato(b, "Tocca ancora: cancella paesi, città e foto")) return;
     if (DB.bloccato) { avvisoLettura(); return; }
     try {
       await DB.sostituisci({ paesi: {}, citta: {} }, []);
@@ -1521,6 +1583,7 @@ async function esportaCopia(ev) {
     return;
   }
   if (b.disabled) return;
+  if (DB.bloccato) { avvisoLettura(); return; }   // in memoria non c'è niente: la copia sarebbe vuota
   b.textContent = "Preparo la copia…"; b.disabled = true;
   const t0 = Date.now();
   try {
@@ -1538,50 +1601,86 @@ const CODICE = /^[A-Z]{2}$/;
 const IMG_OK = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/;
 function pulisciDati(d) {
   const out = { paesi: {}, citta: {}, meraviglie: Object.fromEntries(Object.keys(d?.meraviglie && typeof d.meraviglie === "object" ? d.meraviglie : {}).filter(q => /^Q\d{1,12}$/.test(q)).slice(0, 5000).map(q => [q, 1])), visti: Array.isArray(d?.visti) ? d.visti.filter(x => typeof x === "string").slice(0, 100) : undefined, liv: Math.max(0, Math.min(LIVELLI.length - 1, Math.floor(+d?.liv) || 0)) };
-  const data = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  const data = v => { if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null; const t = new Date(v + "T00:00:00Z"); return !isNaN(t) && t.toISOString().slice(0, 10) === v ? v : null; };
+  const ordina = x => { if (x.dal && x.al && x.al < x.dal) [x.dal, x.al] = [x.al, x.dal]; return x; };
   const st = v => v === "v" || v === "l" || v === "w" ? v : null;
   const mz = v => Array.isArray(v) ? [...new Set(v.filter(m => proprio(MZ, m)))] : [];
   const nota = v => typeof v === "string" ? v.slice(0, 2000) : "";
-  for (const [c, x] of Object.entries(d?.paesi || {})) if (CODICE.test(c) && P[c] && x) out.paesi[c] = { s: st(x.s), dal: data(x.dal), al: data(x.al), mezzi: mz(x.mezzi), nota: nota(x.nota) };
+  for (const [c, x] of Object.entries(d?.paesi || {})) if (CODICE.test(c) && proprio(P, c) && x) out.paesi[c] = ordina({ s: st(x.s), dal: data(x.dal), al: data(x.al), mezzi: mz(x.mezzi), nota: nota(x.nota) });
   for (const x of Object.values(d?.citta || {})) {
-    if (!x || typeof x.id !== "string" || !P[x.c] || typeof x.n !== "string") continue;
+    if (!x || typeof x.id !== "string" || !CODICE.test(x.c) || !proprio(P, x.c) || typeof x.n !== "string") continue;
     const ll = Array.isArray(x.ll) && x.ll.length === 2 && x.ll.every(n => typeof n === "number" && isFinite(n)) ? x.ll : null;
     const id = x.id.slice(0, 40);
     if (out.citta[id]) continue;
-    out.citta[id] = { id, c: x.c, n: x.n.slice(0, 60), r: typeof x.r === "string" ? x.r.slice(0, 60) : "", ll, s: st(x.s), dal: data(x.dal), al: data(x.al), mezzi: mz(x.mezzi), nota: nota(x.nota), t: +x.t || Date.now() };
+    out.citta[id] = ordina({ id, c: x.c, n: x.n.slice(0, 60), r: typeof x.r === "string" ? x.r.slice(0, 60) : "", ll, s: st(x.s), dal: data(x.dal), al: data(x.al), mezzi: mz(x.mezzi), nota: nota(x.nota), t: +x.t || Date.now() });
   }
   return out;
 }
-function chiediRipristino(file) {
-  const r = new FileReader();
-  r.onload = () => {
-    let d; try { d = JSON.parse(r.result); } catch (e) {}
-    if (!d || d.app !== "viatrix" || !d.dati) { toast("Questo file non è una copia di Viatrix"); return; }
-    const nd = pulisciDati(d.dati);
-    $("#b-conf").innerHTML = `<div class="conf"><p>La copia ha <b>${(n => n === 1 ? "1 paese" : n + " paesi")(Object.keys(nd.paesi).length)}</b>, ${Object.keys(nd.citta).length} città, ${d.foto?.length || 0} foto e ${Object.keys(nd.meraviglie).length} posti visti. Sostituisce tutto quello che c'è adesso.</p>
-      <div class="row2"><button class="btn ghost" id="r-no">Annulla</button><button class="btn pieno" id="r-si">Ripristina</button></div></div>`;
-    $("#r-no").onclick = () => $("#b-conf").innerHTML = "";
-    $("#r-si").onclick = async e => {
-      const b = e.currentTarget; b.disabled = true; b.textContent = "Ripristino…";
-      try {
-        const chiavi = new Set([...Object.keys(nd.paesi).map(keyPaese), ...Object.keys(nd.citta).map(keyCitta)]);
-        const foto = [];
-        for (const f of d.foto || []) {
-          if (!f || !IMG_OK.test(f.data) || !chiavi.has(f.k)) continue;
-          const blob = await (await fetch(f.data)).blob();
-          f.data = null;   // il testo lungo della foto non serve più: si libera la memoria
-          const mini = IMG_OK.test(f.mini) ? f.mini : await miniDa(blob);
-          foto.push({ id: String(f.id), k: f.k, t: +f.t || Date.now(), mini, blob });
-        }
-        sistemaDate(nd);
-        await DB.sostituisci(nd, foto);
-        programmaStat(1000);
-        dati = nd; FOTO.clear(); foto.forEach(indicizzaFoto); pctPrima = -1;
-        chiudiTutto(); toast("Copia ripristinata");
-      } catch (er) { b.disabled = false; b.textContent = "Ripristina"; toast("Ripristino non riuscito: i dati di prima sono ancora tutti qui"); }
-    };
+/* Lettura della copia a pezzi (4 MB alla volta): anche una copia con centinaia di foto non riempie la memoria del telefono.
+   Il file è {"app":"viatrix",…,"dati":{…},"foto":[{…},{…}]}: prima si legge la testa fino a "foto":[, poi una foto alla volta. */
+const PEZZO = 4 * 1024 * 1024;
+async function leggiTesta(file) {
+  let testo = "", pos = 0;
+  const dec = new TextDecoder();   // a pezzi, senza spezzare le lettere accentate tra un pezzo e l'altro
+  while (pos < file.size && testo.length < 64 * 1024 * 1024) {
+    testo += dec.decode(await file.slice(pos, pos + PEZZO).arrayBuffer(), { stream: true }); pos += PEZZO;
+    const i = testo.indexOf(',"foto":[');
+    if (i >= 0) { let d; try { d = JSON.parse(testo.slice(0, i) + "}"); } catch (e) { return null; } return { d, inizio: new Blob([testo.slice(0, i)]).size + 9 }; }
+  }
+  // copia senza foto o scritta in un altro ordine: si legge tutta (solo se non è enorme)
+  if (file.size > 64 * 1024 * 1024) return null;
+  try { const d = JSON.parse(await file.text()); return { d, foto: Array.isArray(d.foto) ? d.foto : [] }; } catch (e) { return null; }
+}
+// una foto alla volta: si contano le parentesi fuori dalle stringhe
+async function* fotoDellaCopia(file, inizio) {
+  let pos = inizio, buf = "", prof = 0, inStr = false, esc_ = false, da = -1;
+  const dec = new TextDecoder();
+  while (pos < file.size) {
+    const pezzo = dec.decode(await file.slice(pos, pos + PEZZO).arrayBuffer(), { stream: true }); pos += PEZZO;
+    let i = buf.length; buf += pezzo;
+    for (; i < buf.length; i++) {
+      const ch = buf[i];
+      if (inStr) { if (esc_) esc_ = false; else if (ch === "\\") esc_ = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === "{") { if (prof++ === 0) da = i; }
+      else if (ch === "}") { if (--prof === 0 && da >= 0) { try { yield JSON.parse(buf.slice(da, i + 1)); } catch (e) {} da = -1; } }
+      else if (ch === "]" && prof === 0) return;
+    }
+    // si tiene solo la foto ancora a metà
+    if (da >= 0) { buf = buf.slice(da); da = 0; } else buf = "";
+  }
+}
+async function chiediRipristino(file) {
+  const t = await leggiTesta(file);
+  const d = t && t.d;
+  if (!d || d.app !== "viatrix" || !d.dati || typeof d.dati !== "object") { toast("Questo file non è una copia di Viatrix"); return; }
+  const nd = pulisciDati(d.dati);
+  const mb = Math.max(1, Math.round(file.size / 1048576));
+  $("#b-conf").innerHTML = `<div class="conf"><p>La copia ha <b>${(n => n === 1 ? "1 paese" : n + " paesi")(Object.keys(nd.paesi).length)}</b>, ${Object.keys(nd.citta).length} città, ${(n => n === 1 ? "1 posto visto" : n + " posti visti")(Object.keys(nd.meraviglie).length)} e le foto (${mb} MB in tutto). Sostituisce tutto quello che c'è adesso.</p>
+    <div class="row2"><button class="btn ghost" id="r-no">Annulla</button><button class="btn pieno" id="r-si">Ripristina</button></div></div>`;
+  $("#r-no").onclick = () => $("#b-conf").innerHTML = "";
+  $("#r-si").onclick = async e => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Ripristino…";
+    try {
+      const chiavi = new Set([...Object.keys(nd.paesi).map(keyPaese), ...Object.keys(nd.citta).map(keyCitta)]);
+      const foto = [], visti = new Set();
+      const tutte = t.foto ? (async function* () { yield* t.foto; })() : fotoDellaCopia(file, t.inizio);
+      for await (const f of tutte) {
+        if (!f || typeof f !== "object" || !IMG_OK.test(f.data) || !chiavi.has(f.k)) continue;
+        const id = String(f.id).slice(0, 40); if (visti.has(id)) continue; visti.add(id);
+        const blob = await (await fetch(f.data)).blob();
+        f.data = null;   // il testo lungo della foto non serve più: si libera la memoria
+        const mini = IMG_OK.test(f.mini) ? f.mini : await miniDa(blob);
+        foto.push({ id, k: f.k, t: +f.t || Date.now(), mini, blob });
+        if (foto.length % 10 === 0) b.textContent = `Ripristino… ${foto.length} foto`;
+      }
+      sistemaDate(nd);
+      await DB.sostituisci(nd, foto);
+      programmaStat(1000);
+      dati = nd; FOTO.clear(); foto.forEach(indicizzaFoto); pctPrima = -1;
+      chiudiTutto(); toast("Copia ripristinata");
+    } catch (er) { b.disabled = false; b.textContent = "Ripristina"; toast("Ripristino non riuscito: i dati di prima sono ancora tutti qui"); }
   };
-  r.readAsText(file);
 }
 
 /* ---------- Foto ---------- */
@@ -1629,8 +1728,11 @@ async function aggiungiFoto(k, files, top) {
   programmaStat();
   if (pila[pila.length - 1] === top) {
     const y = $("#sheet").scrollTop;
-    const box = $("#album"); const tmp = document.createElement("div"); tmp.innerHTML = htmlFoto(k);
-    box.previousElementSibling.replaceWith(tmp.firstElementChild); box.replaceWith(tmp.lastElementChild);
+    const box = $("#album"), prima = new Set([...box.querySelectorAll("[data-foto]")].map(x => x.dataset.foto));
+    const tmp = document.createElement("div"); tmp.innerHTML = htmlFoto(k);
+    const nuovo = tmp.lastElementChild; nuovo.classList.add("fermo");
+    nuovo.querySelectorAll("[data-foto]").forEach(x => { if (!prima.has(x.dataset.foto)) x.classList.add("nuova"); });
+    box.previousElementSibling.replaceWith(tmp.firstElementChild); box.replaceWith(nuovo);
     $("#f-foto").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) aggiungiFoto(k, fs, top); });
     $("#album").addEventListener("click", e => { const b = e.target.closest("[data-foto]"); if (b) apriFoto(k, b.dataset.foto, top); });
     $("#sheet").scrollTop = y;
@@ -1652,12 +1754,12 @@ function apriFoto(k, id, top) {
   v.onclick = e => { if (e.target === v) history.back(); };
   v.querySelector("[data-del]").onclick = async e => {
     const b = e.currentTarget;
-    if (!b.classList.contains("sicuro")) { b.classList.add("sicuro"); b.textContent = "Tocca ancora per eliminare"; tocco(); return; }
+    if (!armato(b, "Tocca ancora per eliminare")) return;
     // se non si cancella davvero, resta anche qui (prima spariva e poi tornava alla riapertura)
     try { await DB.del("foto", id); } catch (er) { toast(DB.bloccato ? "Non salvo niente: prima riapri l'app" : "Non riesco a eliminare la foto: riprova"); return; }
     FOTO.set(k, (FOTO.get(k) || []).filter(x => x.id !== id));
     if (!FOTO.get(k).length) FOTO.delete(k);
-    if (k.startsWith("p:")) pulisciVuoto(k.slice(2));
+    if (k.startsWith("p:")) { pulisciVuoto(k.slice(2)); salva(); }
     history.back();
     setTimeout(() => { if (pila[pila.length - 1] === top) { top.scroll = $("#sheet").scrollTop; mostra(false); } }, 60);
     toast("Foto eliminata");
@@ -1668,7 +1770,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "2.8";
+const VERSIONE_APP = "2.9";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
@@ -1745,6 +1847,7 @@ async function leggiDispositivi() {
     const d = await r.json();
     (d.documents || []).forEach(x => out.push(pulisciRiepilogo(x.name.split("/").pop(), Object.fromEntries(Object.entries(x.fields || {}).map(([k, v]) => [k, daFS(v)])))));
     if (!d.nextPageToken) break; pt = d.nextPageToken;
+    if (i === 19) out.tagliato = true;
   }
   return out;
 }
@@ -1842,7 +1945,7 @@ async function caricaStat() {
       <div class="r"><div>Android<span>${l.filter(x => x.os === "android").length}</span></div></div>
       ${l.some(x => x.os === "altro") ? `<div class="r"><div>Computer o altro<span>${l.filter(x => x.os === "altro").length}</span></div></div>` : ""}
       <div class="r"><div>Con la versione ${VERSIONE_APP}<span>${l.filter(x => x.v === VERSIONE_APP).length} di ${l.length}</span></div></div></div>
-    <p class="piccolo">Numeri anonimi: niente nomi, città, date, foto o note. Si aggiornano quando qualcuno apre l'app.</p>`;
+    <p class="piccolo">Numeri anonimi: niente nomi, città, date, foto o note. Si aggiornano quando qualcuno apre l'app.${l.tagliato ? " Elenco tagliato: ci sono più di 6.000 riepiloghi, si vedono i primi." : ""}</p>`;
   requestAnimationFrame(() => requestAnimationFrame(() => $$("#stat-box .barra i").forEach(b => b.style.setProperty("--f", b.dataset.f))));
   $$("#stat-box .tile b[data-n]").forEach(b => contaSu(b, 0, +b.dataset.n, x => Math.round(x).toLocaleString("it-IT")));
   const tutti = new Map(vis); vivo.forEach(([c, n]) => tutti.set(c, (tutti.get(c) || 0) + n));
@@ -1963,7 +2066,8 @@ $$(".vista.scorre").forEach(v => {
   let attesa = false;
   v.addEventListener("scroll", () => { if (attesa) return; attesa = true; requestAnimationFrame(() => { barraTitolo(); attesa = false; }); }, { passive: true });
 });
-/* Tastiera dell'iPhone: il campo scelto resta visibile */
+/* Tastiera dell'iPhone: il campo scelto resta visibile (nel foglio a metà prima si apre del tutto) */
+document.addEventListener("focusin", e => { if (e.target.closest?.("#sheet.meta") && e.target.matches("input:not([type=date]):not([type=file]),textarea")) espandi(); });
 document.addEventListener("focusin", e => {
   const c = e.target.closest("textarea,input[type=search]"); if (!c) return;
   setTimeout(() => c.scrollIntoView({ block: "center", behavior: pocoMoto() ? "auto" : "smooth" }), 320);
@@ -1975,13 +2079,15 @@ addEventListener("pagehide", salvaSubito);
 (async () => {
   leggiColori();
   $("#mappa").innerHTML = `<div class="caric">Preparo la mappa…</div>`;
-  try { await DB.open(); } catch (e) { toast("Il telefono non lascia salvare i dati: forse è una finestra privata"); }
-  if (DB.db) {
+  const entro = (p, ms) => Promise.race([p, new Promise((_, ko) => setTimeout(() => ko(new Error("tempo")), ms))]);
+  try { await entro(DB.open(), 4000); }
+  catch (e) { if (e.message === "tempo") DB.bloccato = true; else toast("Il telefono non lascia salvare i dati: forse è una finestra privata"); }
+  if (DB.db && !DB.bloccato) {
     // Lettura dei dati salvati, con due tentativi in più (su iPhone a volte l'archivio risponde in ritardo).
     // Se non si leggono, l'app parte ma NON salva niente: altrimenti la mappa vuota cancellerebbe quella vera.
     for (let i = 0; ; i++) {
       try {
-        const d = await DB.get("stato", "dati"), foto = await DB.all("foto");
+        const d = await entro(DB.get("stato", "dati"), 4000), foto = await entro(DB.all("foto"), 4000);
         if (d) dati = { paesi: d.paesi || {}, citta: d.citta || {}, visti: d.visti, liv: d.liv || 0, meraviglie: d.meraviglie || {} };
         sistemaDate(dati);
         FOTO.clear(); foto.forEach(indicizzaFoto);
@@ -1994,7 +2100,7 @@ addEventListener("pagehide", salvaSubito);
     if (!DB.bloccato && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   }
   try {
-    const [pa, mo] = await Promise.all([fetch("data/paesi.json").then(r => r.json()), fetch("data/mondo.json").then(r => r.json())]);
+    const [pa, mo] = await Promise.all([fetch(`data/paesi.json?v=${DATI_V}`).then(r => r.json()), fetch(`data/mondo.json?v=${DATI_V}`).then(r => r.json())]);
     PAESI = pa; P = Object.fromEntries(pa.map(p => [p.c, p]));
     MONDO = topojson.feature(mo, mo.objects.countries).features;
     // forme che passano la linea del cambio di data (Russia, Figi): se risultano "rovesciate" si girano i bordi

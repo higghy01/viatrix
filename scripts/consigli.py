@@ -10,8 +10,9 @@ Riga di ogni luogo: [id Wikidata, nome, descrizione, lat, lon, foto, titolo it.w
   https://upload.wikimedia.org/wikipedia/commons/thumb/<percorso>/<330|500|960>px-<nome> (misure standard di Wikimedia).
 - Si prendono i luoghi delle categorie qui sotto e di tutte le loro sottocategorie (es. "torre dell'orologio" → torre,
   così c'è il Big Ben), più i patrimoni UNESCO; niente centri abitati (hanno la popolazione) e niente luoghi divisi tra più di 3 paesi.
-- Il tipo (per l'icona) si sceglie con PRIORITA: prima castello, palazzo, chiesa…, "museo" quasi per ultimo
-  (tanti castelli e palazzi sono anche musei: il Castello di Windsor deve restare "castello").
+- Il tipo (per l'icona) si sceglie con PRIORITA: chiesa, rovine, monumento, castello… "museo" quasi per ultimo
+  (tanti castelli e palazzi sono anche musei). Così: Colosseo = sito antico, Torre di Pisa = torre, Statua della Libertà = monumento.
+- Dopo, scripts/rifinisci_consigli.js toglie i doppioni e i posti che stanno dentro un altro paese o sott'acqua.
 """
 import sys, os, json, time, re, hashlib, urllib.request, urllib.parse
 OUT = sys.argv[1]
@@ -31,7 +32,7 @@ TIPI = {
   "piazza": "Q174782", "monumento": "Q4989906 Q179700 Q483453", "rovine": "Q839954 Q15661340 Q109607",
   "citta": "Q676050 Q15243209", "parco": "Q22698 Q1107656 Q46169 Q43501 Q2416723 Q2281788",
   "acqua": "Q23397 Q34038 Q40080 Q35509", "montagna": "Q8502 Q8072 Q35666 Q150784", "luogo": "Q570116"}
-PRIORITA = ["castello", "palazzo", "chiesa", "tempio", "torre", "ponte", "teatro", "rovine", "piazza", "monumento",
+PRIORITA = ["chiesa", "rovine", "monumento", "castello", "palazzo", "torre", "ponte", "teatro", "tempio", "piazza",
             "citta", "parco", "acqua", "montagna", "museo", "luogo"]
 CLASSE = {q: t for t, qs in TIPI.items() for q in qs.split()}
 VAL = " ".join("wd:" + q for q in CLASSE)
