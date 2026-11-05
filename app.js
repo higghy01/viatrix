@@ -866,9 +866,12 @@ function mostra(avanti) {
   const html = top.tipo === "paese" ? htmlPaese(top.c) : top.tipo === "citta" ? htmlCitta(top.id) : top.tipo === "scegli" ? htmlScegli(top.c) : top.tipo === "stat" ? htmlStat() : top.tipo === "mv" ? htmlMv(top) : htmlImp();
   if (html == null) { indietro(); return; }
   const fai = () => {
+    const y = top.scroll || 0;
     sh.innerHTML = `<div class="grab" data-grab></div>` + html;
-    sh.scrollTop = top.scroll || 0;
+    sh.scrollTop = y;
     collega(top);
+    // (i posti da non perdere, se già scaricati, si disegnano subito dentro collega: si torna al punto giusto)
+    sh.scrollTop = y; top.scroll = y;
   };
   modoFoglio(top);
   if (!giaAperto) {
@@ -1011,13 +1014,13 @@ function htmlPaese(c) {
     <div class="blk-h">Questo paese</div>
     ${htmlStato(d.s || null, statoPaese(c))}
     <div id="viaggio">${htmlViaggio(d)}</div>
-    <div id="consigli"></div>
     <div class="blk-h">Città <small>${cs.length ? cs.length + (cs.length === 1 ? " città" : " città") : ""}</small></div>
     <div class="card citta">
       ${cs.map(x => `<button class="riga" data-citta="${esc(x.id)}"><span class="dot" style="--c:var(${STATI[x.s || "w"].cv})"></span>
         <span class="nm"><b>${esc(x.n)}</b><small>${esc([x.s ? STATI[x.s].t : "", fmtPeriodo(x.dal, x.al), (x.mezzi || []).map(m => MZ[m]?.[1]).join("")].filter(Boolean).join(" · "))}</small></span>${ICO.vai}</button>`).join("")}
       <button class="add-row" data-aggiungi>${ICO.piu}Aggiungi una città</button>
     </div>
+    <div id="consigli"></div>
     ${htmlFoto(keyPaese(c))}
     ${htmlNota(d)}
   </div>`;
@@ -1045,33 +1048,55 @@ function htmlCitta(id) {
    Dati preparati da scripts/consigli.py (Wikidata: la fama = in quante lingue c'è la pagina Wikipedia).
    Riga: [id, nome, descrizione, lat, lon, foto, titolo it.wikipedia, titolo en.wikipedia, fama, tipo].
    La spunta "visto" resta sul telefono (dati.meraviglie). Foto da Wikimedia Commons, testo da Wikipedia. */
-const CONSIGLI = new Map();
-async function caricaConsigli(c) {
-  if (CONSIGLI.has(c)) return CONSIGLI.get(c);
-  try { const r = await fetch(`data/consigli/${c}.json`); const d = r.ok ? await r.json() : []; CONSIGLI.set(c, Array.isArray(d) ? d : []); }
-  catch (e) { return null; }   // senza rete: si riprova la prossima volta
-  return CONSIGLI.get(c);
+const CONSIGLI = new Map(), IN_ARRIVO = new Map();
+function caricaConsigli(c) {
+  if (CONSIGLI.has(c)) return Promise.resolve(CONSIGLI.get(c));
+  if (!IN_ARRIVO.has(c)) IN_ARRIVO.set(c, fetch(`data/consigli/${c}.json`).then(r => r.ok ? r.json() : []).then(d => { CONSIGLI.set(c, Array.isArray(d) ? d : []); return CONSIGLI.get(c); })
+    .catch(() => null).finally(() => IN_ARRIVO.delete(c)));   // senza rete: null, si riprova la prossima volta
+  return IN_ARRIVO.get(c);
 }
 const TIPO_MV = { museo: ["🖼️", "Museo"], chiesa: ["⛪", "Chiesa"], tempio: ["🛕", "Luogo sacro"], castello: ["🏰", "Castello"], palazzo: ["👑", "Palazzo"],
   rovine: ["🏛️", "Sito antico"], piazza: ["🏙️", "Piazza"], ponte: ["🌉", "Ponte"], torre: ["🗼", "Torre"], monumento: ["⛲", "Monumento"],
   parco: ["🌳", "Parco"], montagna: ["⛰️", "Montagna"], acqua: ["🏞️", "Natura"], citta: ["🏘️", "Borgo storico"], teatro: ["🎭", "Teatro"], luogo: ["⭐", "Da vedere"] };
 const tipoMv = t => TIPO_MV[proprio(TIPO_MV, t) ? t : "luogo"];
-const fotoWiki = (f, w) => f ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(f)}?width=${w}` : "";
-const visto = q => !!(dati.meraviglie && dati.meraviglie[q]);
+// f = percorso su Commons ("d/de/Nome.jpg"); w = misura standard di Wikimedia (330, 500, 960)
+function fotoWiki(f, w) {
+  if (!f || !/^[0-9a-f]\/[0-9a-f]{2}\/[^/]+$/.test(f)) return "";
+  const nome = f.slice(5), est = nome.split(".").pop().toLowerCase();
+  const mini = est === "svg" ? `${w}px-${nome}.png` : est === "tif" || est === "tiff" ? `lossy-page1-${w}px-${nome}.jpg` : `${w}px-${nome}`;
+  return `https://upload.wikimedia.org/wikipedia/commons/thumb/${f.slice(0, 5)}${encodeURIComponent(nome)}/${encodeURIComponent(mini)}`;
+}
+const visto = q => !!(dati.meraviglie && proprio(dati.meraviglie, q) && dati.meraviglie[q]);
 const kmTra = (a, b, c, d) => { const r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
-// i posti da mostrare: per un paese i 12 più famosi, per una città gli 8 più famosi entro 10 km
+// i posti da mostrare: per un paese i 12 più famosi, per una città gli 8 più famosi entro 15 km.
+// Elenco vario: al massimo 3 dello stesso tipo, 2 torri o grattacieli, 3 tra montagne e acque (la Cina non sono solo vette, Dubai non solo grattacieli)
+function vari(righe, quanti) {
+  const out = [], per = {};
+  for (const r of righe) {
+    if (out.length >= quanti) break;
+    const t = r[9], nat = t === "montagna" || t === "acqua";
+    if ((per[t] || 0) >= (t === "torre" ? 2 : 3) || (nat && (per.natura || 0) >= 3)) continue;
+    per[t] = (per[t] || 0) + 1; if (nat) per.natura = (per.natura || 0) + 1;
+    out.push(r);
+  }
+  return out;
+}
 function sceltaConsigli(righe, top) {
   if (top.tipo === "citta") {
     const x = dati.citta[top.id]; if (!x || !x.ll) return [];
-    return righe.filter(r => kmTra(x.ll[0], x.ll[1], r[3], r[4]) <= 10).slice(0, 8);
+    return vari(righe.filter(r => kmTra(x.ll[0], x.ll[1], r[3], r[4]) <= 15), 8);
   }
-  return righe.slice(0, 12);
+  return vari(righe, 12);
 }
-async function riempiConsigli(top) {
+function riempiConsigli(top) {
   const box = $("#consigli"); if (!box) return;
   const c = top.tipo === "paese" ? top.c : dati.citta[top.id]?.c;
-  const righe = await caricaConsigli(c);
-  if (pila[pila.length - 1] !== top || !$("#consigli")) return;
+  if (top.tipo === "citta" && !dati.citta[top.id]?.ll) return;
+  if (CONSIGLI.has(c)) return disegnaConsigli(box, top, c, CONSIGLI.get(c));
+  box.innerHTML = `<div class="blk-h">Da non perdere</div><div class="mv-grid mv-attesa"><span></span><span></span></div>`;
+  caricaConsigli(c).then(righe => { if (box.isConnected && pila[pila.length - 1] === top) disegnaConsigli(box, top, c, righe); });
+}
+function disegnaConsigli(box, top, c, righe) {
   if (!righe) { box.innerHTML = ""; return; }
   const lista = sceltaConsigli(righe, top);
   top.mv = lista;
@@ -1079,18 +1104,19 @@ async function riempiConsigli(top) {
   if (!lista.length) { box.innerHTML = ""; return; }
   const nome = top.tipo === "citta" ? dati.citta[top.id].n : null;
   const s = top.tipo === "citta" ? dati.citta[top.id].s : statoPaese(c);
-  const quanti = top.tutti ? lista.length : Math.min(lista.length, top.tipo === "citta" ? 4 : 6);
+  const quanti = top.tutti ? lista.length : Math.min(lista.length, 4);
   box.innerHTML = `<div class="blk-h">Da non perdere${nome ? " a " + esc(nome) : ""} <small id="mv-n">${contaVisti(lista)}</small></div>
-    <p class="piccolo mv-intro">${(top.tipo === "citta" ? dati.citta[top.id].s : (dati.paesi[c] || {}).s) === "w" ? "Quando ci andrai: i posti più famosi, da segnare con ✓ quando li vedi." : s ? "Tocca ✓ sui posti che hai visto." : "I posti più famosi, secondo Wikipedia."}</p>
+    <p class="piccolo mv-intro">${introMv((top.tipo === "citta" ? dati.citta[top.id].s : (dati.paesi[c] || {}).s) || s)}</p>
     <div class="mv-grid">${lista.slice(0, quanti).map((r, i) => cartaMv(r, i)).join("")}</div>
     ${lista.length > quanti ? `<button class="allbtn" id="mv-altri">Mostra altri ${lista.length - quanti}</button>` : ""}`;
   collegaMv(box, top);
 }
+const introMv = s => s === "w" ? "Per quando ci andrai. Segna ✓ quelli che vedi." : s ? "Segna ✓ quelli che hai visto." : "I più famosi, secondo Wikipedia.";
 const contaVisti = l => { const n = l.filter(r => visto(r[0])).length; return n ? `${n} di ${l.length} visti` : `${l.length} posti`; };
 function cartaMv(r, i) {
   const [e] = tipoMv(r[9]);
   return `<div class="mv" style="--i:${Math.min(i, 8)}">
-    <button class="mv-apri" data-mv="${esc(r[0])}"><span class="mv-img" data-e="${e}">${r[5] ? `<img src="${esc(fotoWiki(r[5], 360))}" alt="" loading="lazy" decoding="async">` : ""}</span>
+    <button class="mv-apri" data-mv="${esc(r[0])}"><span class="mv-img" data-e="${e}">${fotoWiki(r[5], 330) ? `<img src="${esc(fotoWiki(r[5], 330))}" alt="" loading="lazy" decoding="async" crossorigin="anonymous">` : ""}</span>
       <span class="mv-t"><b>${esc(r[1])}</b><small>${esc(r[2] || tipoMv(r[9])[1])}</small></span></button>
     <button class="mv-ok" data-visto="${esc(r[0])}" aria-pressed="${visto(r[0])}" aria-label="Visto: ${esc(r[1])}">✓</button></div>`;
 }
@@ -1142,7 +1168,7 @@ function htmlMv(top) {
   const mappe = suIOS() ? `https://maps.apple.com/?ll=${r[3]},${r[4]}&q=${encodeURIComponent(r[1])}` : `https://www.google.com/maps/search/?api=1&query=${r[3]},${r[4]}`;
   const wiki = r[6] ? `https://it.wikipedia.org/wiki/${encodeURIComponent(r[6].replace(/ /g, "_"))}` : r[7] ? `https://en.wikipedia.org/wiki/${encodeURIComponent(r[7].replace(/ /g, "_"))}` : "";
   return `${barraFoglio()}<div class="sh-body">
-    <div class="mv-hero" data-e="${e}">${r[5] ? `<img src="${esc(fotoWiki(r[5], 900))}" alt="">` : ""}</div>
+    <div class="mv-hero" data-e="${e}">${fotoWiki(r[5], 960) ? `<img src="${esc(fotoWiki(r[5], 960))}" alt="" crossorigin="anonymous">` : ""}</div>
     <div class="kicker" style="margin-top:14px">${e} ${t} · ${bandiera(top.c)} ${esc(P[top.c]?.n || "")}</div>
     <h2 class="mv-h">${esc(r[1])}</h2>
     ${r[2] ? `<p class="mv-desc">${esc(r[2])}</p>` : ""}
@@ -1177,8 +1203,8 @@ async function collegaMvPagina(top) {
     }
     if (testo) RIASSUNTI.set(chiave, testo);
   }
-  if (!$("#mv-testo")) return;
-  p.textContent = testo ? testo.t + (testo.en ? " (da Wikipedia in inglese)" : "") : "Il testo di Wikipedia arriva quando c'è internet.";
+  if (!p.isConnected) return;
+  p.textContent = testo ? testo.t + (testo.en ? " (da Wikipedia in inglese)" : "") : navigator.onLine ? "" : "Il testo di Wikipedia arriva quando c'è internet.";
   if (testo && p.animate && !pocoMoto()) p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400 });
 }
 
@@ -1302,7 +1328,7 @@ function collegaLuogo(top) {
     if (nuovo && !cera && vb.animate && !pocoMoto()) vb.animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: 420, easing: MOLLA });
     aggiornaMini(top);
     tingi(top);
-    const intro = $(".mv-intro"); if (intro) intro.textContent = d.s === "w" ? "Quando ci andrai: i posti più famosi, da segnare con ✓ quando li vedi." : statoPaese(c) || d.s ? "Tocca ✓ sui posti che hai visto." : "I posti più famosi, secondo Wikipedia.";
+    const intro = $(".mv-intro"); if (intro) intro.textContent = introMv(d.s || (paese ? statoPaese(c) : null));
     // la festa: coriandoli dal pulsante, stelline per i sogni
     if (d.s && !pocoMoto()) {
       const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 3;
@@ -1527,7 +1553,7 @@ function chiediRipristino(file) {
     let d; try { d = JSON.parse(r.result); } catch (e) {}
     if (!d || d.app !== "viatrix" || !d.dati) { toast("Questo file non è una copia di Viatrix"); return; }
     const nd = pulisciDati(d.dati);
-    $("#b-conf").innerHTML = `<div class="conf"><p>La copia ha <b>${(n => n === 1 ? "1 paese" : n + " paesi")(Object.keys(nd.paesi).length)}</b>, ${Object.keys(nd.citta).length} città e ${d.foto?.length || 0} foto. Sostituisce tutto quello che c'è adesso.</p>
+    $("#b-conf").innerHTML = `<div class="conf"><p>La copia ha <b>${(n => n === 1 ? "1 paese" : n + " paesi")(Object.keys(nd.paesi).length)}</b>, ${Object.keys(nd.citta).length} città, ${d.foto?.length || 0} foto e ${Object.keys(nd.meraviglie).length} posti visti. Sostituisce tutto quello che c'è adesso.</p>
       <div class="row2"><button class="btn ghost" id="r-no">Annulla</button><button class="btn pieno" id="r-si">Ripristina</button></div></div>`;
     $("#r-no").onclick = () => $("#b-conf").innerHTML = "";
     $("#r-si").onclick = async e => {
@@ -1841,7 +1867,7 @@ function disegnaMappaStat(conti) {
 const installata = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const suIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const suTelefono = () => suIOS() || /Android/.test(navigator.userAgent);
-const ciSonoDati = () => Object.keys(dati.paesi).length > 0 || Object.keys(dati.citta).length > 0 || FOTO.size > 0;
+const ciSonoDati = () => Object.keys(dati.paesi).length > 0 || Object.keys(dati.citta).length > 0 || FOTO.size > 0 || Object.keys(dati.meraviglie || {}).length > 0;
 function avvisoHome(forza) {
   if (installata() || (!forza && !suTelefono())) return false;
   if (!forza && Date.now() < (+leggiLS("viatrix-home-dopo") || 0)) return false;

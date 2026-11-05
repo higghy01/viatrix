@@ -496,3 +496,5 @@ html[data-tab="paesi"] .home-av,html[data-tab="numeri"] .home-av{opacity:0;visib
 .mv-testo{margin:14px 0 4px;font-size:15.5px;line-height:1.55;white-space:pre-line}
 .mv-testo:empty{display:none}
 a.btn{text-decoration:none;color:inherit}
+.mv-attesa span{display:block;aspect-ratio:4/5;border-radius:18px;background:var(--surface);box-shadow:var(--shadow);animation:vx-attesa 1.2s ease-in-out infinite alternate}
+@keyframes vx-attesa{from{opacity:.55}to{opacity:1}}
