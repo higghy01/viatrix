@@ -328,9 +328,11 @@ html.avvio .m-btn{animation:vx-appare .6s ease both 1s}
 
 /* foglio a metà: sopra resta la mappa col paese */
 .sheet{--tinta:transparent}
-.sheet::before{content:"";display:block;position:sticky;top:-8px;z-index:-1;height:380px;pointer-events:none;will-change:transform;
-  margin:-8px calc(-1 * max(18px,env(safe-area-inset-right,0px))) -372px calc(-1 * max(18px,env(safe-area-inset-left,0px)));
-  background:radial-gradient(130% 380px at 0% 0%,color-mix(in srgb,var(--tinta) 22%,transparent),transparent 70%);transition:--tinta .6s ease}
+/* la sfumatura del colore del paese in alto nel foglio: è lo sfondo del foglio stesso (resta ferma in alto mentre si scorre).
+   Prima era un elemento "sticky" dietro il contenuto (z-index -1): su iPhone copriva tutto il testo normale del foglio
+   (nome del paese, X, titoli, "Aggiungi una città") e si vedevano solo pulsanti, bandiera e foto. */
+.sheet{background:radial-gradient(130% 380px at 0% 0%,color-mix(in srgb,var(--tinta) 22%,transparent),transparent 70%) no-repeat,var(--bg);
+  transition:transform .55s var(--ios),--tinta .6s ease}
 .sheet.meta.on{transform:translateY(40%)}
 .sheet.meta .sh-body{padding-bottom:42vh}
 /* nel foglio a metà la mappa grande sopra mostra già il paese: niente mappa piccola, così Visitato / Ci vivo / Vorrei andarci si vedono subito */

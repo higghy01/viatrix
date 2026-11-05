@@ -1018,7 +1018,9 @@ function mostra(avanti) {
     sh._fade = true;
     sh.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "ease-out" }).onfinish = () => {
       fai(); sh._fade = false;
-      sh.animate([{ opacity: 0, transform: `translateY(${avanti ? 10 : -6}px)` }, { opacity: 1, transform: "none" }], { duration: 300, easing: MOLLA });
+      // "translate" e non "transform": transform avrebbe preso il posto di quello del foglio a metà (40% più giù)
+      // e per 0,3 secondi il foglio saltava a tutta altezza (si vede nel video di Sasha del 05/11)
+      sh.animate([{ opacity: 0, translate: `0 ${avanti ? 10 : -6}px` }, { opacity: 1, translate: "0 0" }], { duration: 300, easing: MOLLA });
     };
   }
 }
@@ -1868,7 +1870,7 @@ function apriFoto(k, id, top) {
    Ogni telefono manda al progetto Firebase di Viatrix un riepilogo senza nomi: paesi segnati (solo i codici),
    quante città e foto, livello, mezzi, se è sulla Home, primo e ultimo giorno di uso. Mai città, date dei viaggi, foto o note.
    Le regole del database fanno leggere tutto solo a Sasha, che entra con email e password nella sua sezione. */
-const VERSIONE_APP = "3.0";
+const VERSIONE_APP = "3.1";
 const FB = window.VIATRIX_FIREBASE || {};
 const statAttive = () => !!(FB.progetto && FB.chiaveWeb);
 const FS_DOC = p => `https://firestore.googleapis.com/v1/projects/${FB.progetto}/databases/(default)/documents/${p}`;
