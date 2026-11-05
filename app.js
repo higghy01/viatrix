@@ -1895,9 +1895,11 @@ const fsV = v => typeof v === "boolean" ? { booleanValue: v } : Number.isInteger
 const daFS = v => !v ? null : "stringValue" in v ? v.stringValue : "integerValue" in v ? +v.integerValue : "booleanValue" in v ? v.booleanValue
   : "arrayValue" in v ? (v.arrayValue.values || []).map(daFS) : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, daFS(x)])) : null;
 let tStat = null;
-function programmaStat(ms) { if (!FB.progetto || DB.bloccato) return; clearTimeout(tStat); tStat = setTimeout(inviaStat, ms ?? 8000); }
+// i riepiloghi partono solo dal sito vero: mai dalle prove sul computer o dalle anteprime (sporcherebbero i numeri di Sasha)
+const sitoVero = () => location.protocol === "https:" && location.hostname === "higghy01.github.io";
+function programmaStat(ms) { if (!FB.progetto || DB.bloccato || !sitoVero()) return; clearTimeout(tStat); tStat = setTimeout(inviaStat, ms ?? 8000); }
 async function inviaStat() {
-  if (!FB.progetto || !navigator.onLine || !PAESI.length) return;
+  if (!FB.progetto || !navigator.onLine || !PAESI.length || !sitoVero()) return;
   const id = idDispositivo(); if (!id) return;
   try {
     const S = statistiche();
