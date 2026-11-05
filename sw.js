@@ -1,9 +1,9 @@
 /* Copia dell'app sul telefono: si apre anche senza rete.
    A ogni modifica dei file alzare VERSIONE (e il ?v= in index.html), altrimenti il telefono resta sulla vecchia.
    Se cambiano i file in data/, alzare DATI (qui e in app.js): i dati vecchi si buttano. */
-const VERSIONE = "viatrix-v15";
+const VERSIONE = "viatrix-v16";
 const DATI = "d3";
-const FILE = ["./", "index.html", "tema.js?v=15", "stile.css?v=15", "app.js?v=15", "config.js?v=15", "lib/d3.min.js", "lib/topojson-client.min.js",
+const FILE = ["./", "index.html", "tema.js?v=16", "stile.css?v=16", "app.js?v=16", "config.js?v=16", "lib/d3.min.js", "lib/topojson-client.min.js",
   `data/paesi.json?v=${DATI}`, `data/mondo.json?v=${DATI}`, `data/globo.json?v=${DATI}`, "manifest.json", "icona-180.png", "icona-512.png", "logo.svg"];
 // Con la rete lenta (aeroporto, roaming) si aspetta al massimo 3 secondi, poi si apre la copia
 const ATTESA = 3000;

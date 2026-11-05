@@ -1998,10 +1998,16 @@ function collegaStat() {
   $("#adm-esci").addEventListener("click", () => { tocco(); scriviLS("viatrix-admin", null); tokenAdmin = null; indietro(); toast("Statistiche chiuse"); });
   caricaStat();
 }
+/* Si contano solo i telefoni che hanno già la versione 3.1 o una più nuova (scelta di Sasha, 05/11/2026):
+   i riepiloghi delle versioni vecchie (prove e telefoni non aggiornati) restano nel database ma qui non si vedono.
+   Ogni telefono riscrive il suo riepilogo quando apre l'app: appena si aggiorna, entra nei numeri. */
+const STAT_DA = "3.1";
+const versioneNum = v => String(v || "").split(".").map(n => parseInt(n, 10) || 0);
+const almenoVersione = (v, min) => { const a = versioneNum(v), b = versioneNum(min); for (let i = 0; i < Math.max(a.length, b.length); i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); } return true; };
 async function caricaStat() {
   const box = $("#stat-box");
-  let l;
-  try { l = await leggiDispositivi(); }
+  let l, vecchi = 0;
+  try { const tutti = await leggiDispositivi(); l = tutti.filter(x => almenoVersione(x.v, STAT_DA)); l.tagliato = tutti.tagliato; vecchi = tutti.length - l.length; }
   catch (e) {
     if (!$("#stat-box")) return;
     if (e.message === "fuori") { box.innerHTML = `<div class="vuoto">L'accesso è scaduto: esci e rientra.</div>`; return; }
@@ -2009,7 +2015,7 @@ async function caricaStat() {
     return;
   }
   if (!$("#stat-box")) return;
-  if (!l.length) { box.innerHTML = `<div class="vuoto"><b>Ancora nessuno</b>I numeri compaiono quando qualcuno apre l'app.</div>`; return; }
+  if (!l.length) { box.innerHTML = `<div class="vuoto"><b>Ancora nessuno con la ${STAT_DA}</b>I numeri compaiono quando qualcuno apre l'app aggiornata.</div>`; return; }
   const oggi = giornoN(oggiISO()), da = s => s ? oggi - giornoN(s) : 9999;
   const conta = k => { const m = new Map(); l.forEach(x => x[k].forEach(c => m.set(c, (m.get(c) || 0) + 1))); return [...m.entries()].sort((a, b) => b[1] - a[1] || P[a[0]].n.localeCompare(P[b[0]].n, "it")); };
   const vis = conta("paesi"), sogni = conta("sogni"), vivo = conta("vivo");
@@ -2044,8 +2050,8 @@ async function caricaStat() {
       <div class="r"><div>iPhone<span>${l.filter(x => x.os === "ios").length}</span></div></div>
       <div class="r"><div>Android<span>${l.filter(x => x.os === "android").length}</span></div></div>
       ${l.some(x => x.os === "altro") ? `<div class="r"><div>Computer o altro<span>${l.filter(x => x.os === "altro").length}</span></div></div>` : ""}
-      <div class="r"><div>Con la versione ${VERSIONE_APP}<span>${l.filter(x => x.v === VERSIONE_APP).length} di ${l.length}</span></div></div></div>
-    <p class="piccolo">Numeri anonimi: niente nomi, città, date, foto o note. Si aggiornano quando qualcuno apre l'app.${l.tagliato ? " Elenco tagliato: ci sono più di 6.000 riepiloghi, si vedono i primi." : ""}</p>`;
+      ${VERSIONE_APP !== STAT_DA ? `<div class="r"><div>Con la versione ${VERSIONE_APP}<span>${l.filter(x => x.v === VERSIONE_APP).length} di ${l.length}</span></div></div>` : ""}</div>
+    <p class="piccolo">Contano solo i telefoni con Viatrix ${STAT_DA} o più nuova${vecchi ? ` (${vecchi === 1 ? "1 riepilogo più vecchio non contato" : vecchi + " riepiloghi più vecchi non contati"})` : ""}. Numeri anonimi: niente nomi, città, date, foto o note. Si aggiornano quando qualcuno apre l'app.${l.tagliato ? " Elenco tagliato: ci sono più di 6.000 riepiloghi, si vedono i primi." : ""}</p>`;
   requestAnimationFrame(() => requestAnimationFrame(() => $$("#stat-box .barra i").forEach(b => b.style.setProperty("--f", b.dataset.f))));
   $$("#stat-box .tile b[data-n]").forEach(b => contaSu(b, 0, +b.dataset.n, x => Math.round(x).toLocaleString("it-IT")));
   const tutti = new Map(vis); vivo.forEach(([c, n]) => tutti.set(c, (tutti.get(c) || 0) + n));
