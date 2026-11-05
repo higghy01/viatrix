@@ -1413,9 +1413,9 @@ function htmlImp() {
     <div class="opz" id="tema">${[["auto", "Automatico"], ["light", "Chiaro"], ["dark", "Scuro"]].map(([k, t]) => `<button data-tema="${k}" aria-pressed="${tema === k}">${t}</button>`).join("")}</div>
     ${installata() ? "" : `<button class="btn ghost" id="b-home" style="margin-top:16px">${ICO.aggHome} Come metterla sulla schermata Home</button>`}
     <div class="blk-h">I tuoi dati</div>
-    <p class="piccolo" style="margin-top:0">Città, date, foto e note restano <b>solo su questo telefono</b>. Ogni tanto salva una copia (per esempio su iCloud Drive): serve se cambi telefono.</p>
+    <p class="piccolo" style="margin-top:0">Città, date, foto e note restano <b>solo su questo telefono</b>. Ogni tanto salva una copia (per esempio su ${suIOS() ? "iCloud Drive" : "Google Drive"}): serve se cambi telefono.</p>
     <button class="btn pieno" id="b-salva">Salva una copia</button>
-    <label class="btn ghost" style="cursor:pointer">Ripristina da una copia<input type="file" accept="application/json,.json" id="b-file" hidden></label>
+    <label class="btn ghost" style="cursor:pointer">Ripristina da una copia<input type="file" accept="${ACCETTA_COPIA}" id="b-file" hidden></label>
     <div id="b-conf"></div>
     <button class="btn rosso" id="b-canc" style="margin-top:28px">Cancella tutto</button>
     ${statAttive() && adminDentro() ? `<button class="btn ghost" id="b-stat" style="margin-top:12px">📊 Statistiche (solo per te)</button>` : ""}
@@ -2046,6 +2046,25 @@ function disegnaMappaStat(conti) {
 /* ---------- Avviso: mettila sulla schermata Home ----------
    Aperta da Safari (non dalla Home) l'iPhone può cancellare i dati di un sito che non si apre per qualche settimana:
    per questo, finché non è sulla Home, compare un cartoncino con i passi. "Più tardi" lo rimanda di 3 giorni. */
+// su Android la copia scaricata o arrivata da WhatsApp/Drive può avere un altro tipo: senza questi non si potrebbe sceglierla
+const ACCETTA_COPIA = "application/json,.json,text/plain,application/octet-stream";
+/* Android (Chrome, Samsung Internet): il telefono offre l'installazione con un tocco. Si tiene l'invito
+   e nel cartoncino compare il pulsante "Installa Viatrix" (i passi a mano restano sotto, se non funziona). */
+let invitoInstalla = null;
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); invitoInstalla = e; pulsanteInstalla(); });
+addEventListener("appinstalled", () => { invitoInstalla = null; if ($("#home-av [data-installa]")) chiudiCartoncino(); });
+function pulsanteInstalla() {
+  const el = $("#home-av"), dopo = el.querySelector("[data-dopo]");
+  if (!invitoInstalla || !el.querySelector(".ha-passi.android") || el.querySelector("[data-installa]") || !dopo) return;
+  const b = document.createElement("button"); b.className = "btn pieno ha-btn"; b.dataset.installa = ""; b.textContent = "Installa Viatrix";
+  b.onclick = async () => {
+    tocco(); const inv = invitoInstalla; if (!inv) return;
+    invitoInstalla = null;
+    try { inv.prompt(); const r = await inv.userChoice; if (r && r.outcome === "accepted") { scriviLS("viatrix-home-dopo", String(Date.now() + 3 * 864e5)); chiudiCartoncino(); return; } } catch (e) {}
+    b.remove();   // rifiutato o non disponibile: restano i passi a mano
+  };
+  el.insertBefore(b, dopo);
+}
 const installata = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const suIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const suTelefono = () => suIOS() || /Android/.test(navigator.userAgent);
@@ -2060,7 +2079,11 @@ function avvisoHome(forza) {
     ? [[ICO.condividi, "Tocca <b>Condividi</b>", "il quadrato con la freccia nella barra di Safari (se non lo vedi, prima i tre puntini «…»)"],
        [ICO.aggHome, "Scegli <b>Aggiungi alla schermata Home</b>", "se non c'è, scorri un po' l'elenco"],
        [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]]
-    : [["⋮", "Apri il <b>menu</b> del browser", "i tre puntini in alto"],
+    : /SamsungBrowser/.test(navigator.userAgent)
+    ? [["≡", "Apri il <b>menu</b> di Samsung Internet", "le tre righe in basso a destra"],
+       [ICO.aggHome, "Scegli <b>Aggiungi pagina a</b>, poi <b>Schermata Home</b>", ""],
+       [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]]
+    : [["⋮", "Apri il <b>menu</b> del browser", "i tre puntini vicino all'indirizzo"],
        [ICO.aggHome, "Scegli <b>Installa app</b> o <b>Aggiungi a schermata Home</b>", ""],
        [`<img src="icona-180.png" alt="">`, "Apri <b>Viatrix</b> dalla Home", "da lì è un'app vera, anche senza internet"]];
   if (daPortare) {
@@ -2071,7 +2094,7 @@ function avvisoHome(forza) {
     <div class="ha-t"><b>Mettila sulla schermata Home</b><span>${daPortare
       ? "Così si apre come un'app vera, anche senza internet. Attenzione: l'app sulla Home parte vuota, i viaggi segnati qui non passano da soli. Per portarli, una copia:"
       : `Così si apre come un'app vera, anche senza internet. Aperta solo da ${suIOS() ? "Safari" : "browser"}, il telefono potrebbe cancellare i dati dopo qualche settimana.`}</span></div>
-    <ol class="ha-passi">${passi.map((p, i) => `<li style="--i:${i}"><span class="ha-ic">${p[0]}</span><div>${p[1]}${p[2] ? `<small>${p[2]}</small>` : ""}</div></li>`).join("")}</ol>
+    <ol class="ha-passi${suIOS() ? "" : " android"}">${passi.map((p, i) => `<li style="--i:${i}"><span class="ha-ic">${p[0]}</span><div>${p[1]}${p[2] ? `<small>${p[2]}</small>` : ""}</div></li>`).join("")}</ol>
     ${daPortare ? `<button class="btn pieno ha-btn" data-copia>Salva una copia</button>` : ""}
     <button class="ha-dopo" data-dopo>Più tardi</button>`;
   const chiudi = () => {
@@ -2082,6 +2105,7 @@ function avvisoHome(forza) {
   el.querySelector("[data-x]").onclick = chiudi;
   el.querySelector("[data-dopo]").onclick = chiudi;
   el.querySelector("[data-copia]")?.addEventListener("click", esportaCopia);
+  pulsanteInstalla();
   apriCartoncino(el);
   return true;
 }
@@ -2097,7 +2121,7 @@ function avvisoCopia() {
   const el = $("#home-av");
   el.innerHTML = `<button class="x" data-x aria-label="Chiudi">${ICO.x}</button>
     <div class="ha-t"><b>Hai già segnato dei viaggi in Safari?</b><span>L'app sulla Home ha un archivio suo: se in Safari hai salvato una copia, riportala qui e ritrovi tutto.</span></div>
-    <label class="btn pieno ha-btn">Ripristina una copia<input type="file" accept="application/json,.json" data-file hidden></label>
+    <label class="btn pieno ha-btn">Ripristina una copia<input type="file" accept="${ACCETTA_COPIA}" data-file hidden></label>
     <button class="ha-dopo" data-dopo>No, grazie: comincio da zero</button>`;
   const via = () => { tocco(); scriviLS("viatrix-copia-no", "1"); chiudiCartoncino(); };
   el.querySelector("[data-x]").onclick = via;

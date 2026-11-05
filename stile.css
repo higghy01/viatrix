@@ -31,7 +31,7 @@
 
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
-html{background:var(--bg);-webkit-text-size-adjust:100%;touch-action:manipulation;transition:background-color .45s var(--ios)}
+html{background:var(--bg);-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation;transition:background-color .45s var(--ios)}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
 button,label.add,.tab,.chip-m,.seg button{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
@@ -447,6 +447,8 @@ canvas.festa{position:fixed;inset:0;width:100%;height:100%;z-index:44;pointer-ev
 .ha-ic img{width:100%;height:100%;object-fit:cover}
 .ha-dopo{display:block;margin:10px auto 0;padding:8px 14px;color:var(--ink-soft);font-weight:600;font-size:14px}
 .home-av .ha-btn{height:46px;margin-top:14px;cursor:pointer}
+/* Android con l'installazione a un tocco: basta il pulsante (i passi a mano tornano se l'invito viene rifiutato) */
+.home-av:has([data-installa]) .ha-passi{display:none}
 /* sui telefoni piccoli (iPhone SE) il cartoncino lungo non copre la scheda in alto: scorre dentro */
 .home-av{max-height:calc(100% - var(--tab-h) - env(safe-area-inset-top,0px) - 120px);overflow-y:auto;overscroll-behavior:contain}
 html.avviso-home .m-hint,html.avviso-home .m-btn{opacity:0;pointer-events:none}
