@@ -22,6 +22,20 @@
 <link rel="stylesheet" href="stile.css?v=17">
 </head>
 <body>
+<!-- 09/11/2026: Viatrix si è spostata (questa resta aperta solo per salvare una copia dei viaggi) -->
+<input type="checkbox" id="sposta-x" hidden>
+<div class="spostata" role="note">
+  <label for="sposta-x" class="spostata-x" aria-label="Chiudi">✕</label>
+  <b>Viatrix si è spostata</b> su <a href="https://viatrix-app.web.app/">viatrix-app.web.app</a>, con più novità.<br>
+  Per portare i tuoi viaggi: 1) qui <b>Numeri → ⚙︎ → Salva una copia</b>; 2) apri il nuovo indirizzo e mettilo sulla Home; 3) lì <b>Ripristina da una copia</b>. Poi cancella questa icona.
+</div>
+<style>
+  .spostata { position: fixed; z-index: 90; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 10px); padding: 12px 38px 12px 14px; border-radius: 16px;
+    background: #FFF4CC; color: #3D3000; font: 14px/1.4 -apple-system, system-ui, sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  .spostata a { color: #7A4B00; font-weight: 700; }
+  .spostata-x { position: absolute; top: 6px; right: 10px; font-size: 18px; padding: 4px; cursor: pointer; }
+  #sposta-x:checked + .spostata { display: none; }
+</style>
 <div class="app" id="app">
   <!-- Mappa -->
   <section class="vista on" id="v-mappa" role="tabpanel" aria-label="Mappa">
